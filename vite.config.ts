@@ -7,12 +7,6 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
-  // Pre-bundle UI deps so Vite doesn't re-optimize mid-session (which loads a second React copy).
-  vite: {
-    optimizeDeps: {
-      include: ["@radix-ui/react-slot", "@radix-ui/react-alert-dialog", "@radix-ui/react-label", "sonner", "lucide-react", "class-variance-authority"],
-    },
-  },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
