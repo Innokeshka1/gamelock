@@ -1,9 +1,10 @@
-# GameLock → Lovable Database
+# GameLock — database connection
 
-- [ ] Migration: games, players, bookings, payments, refunds (+ enums, grants, RLS, seed data for 3 demo games)
-- [ ] Domain type alignment (booking/payment/refund statuses, "completed" game status)
-- [ ] Data layer: server functions + row→domain mappers (src/domain/data/)
-- [ ] Store rewrite: same API, backed by database via server functions
-- [ ] Routes: root loader primes store; game head meta from DB
-- [ ] Organizer: Create Game form (DB-backed)
-- [ ] Tests updated + passing; booking flow verified end-to-end
+- [x] Database schema (games, players, bookings, payments, refunds) + demo seed data
+- [x] Align domain statuses with the database (confirmed/pending/cancelled/refunded, completed games)
+- [x] Server-side data layer (`src/domain/data/`) — queries and mutations
+- [x] Store backed by the database (same API, UI unchanged)
+- [x] Root loader primes the store; game metadata from the database
+- [x] Organizer: Create Game form
+- [x] Tests pass
+- [ ] Verify booking/cancel flow end-to-end in the preview
