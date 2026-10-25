@@ -14,6 +14,8 @@ describe("game status", () => {
     expect(computeGameStatus(game, 9, new Date("2026-10-29T13:00:00Z"))).toBe("cancelled"));
   it("cancelled when organizer cancels", () =>
     expect(computeGameStatus({ ...game, cancelledAt: "x" }, 12, early)).toBe("cancelled"));
+  it("completed after the game ends", () =>
+    expect(computeGameStatus(game, 12, new Date("2026-10-30T12:00:00Z"))).toBe("completed"));
 });
 
 describe("refunds", () => {

@@ -85,7 +85,7 @@ export function seedBookings(): { bookings: Booking[]; payments: Payment[] } {
       const id = `bk_${game.id}_${i}`;
       const paymentId = `pay_${game.id}_${i}`;
       const createdAt = "2026-10-20T10:00:00Z";
-      bookings.push({ id, gameId: game.id, player: { id: `pl_${i}`, firstName, lastName }, spots: 1, status: "active", paymentId, createdAt });
+      bookings.push({ id, gameId: game.id, player: { id: `pl_${i}`, firstName, lastName }, spots: 1, status: "confirmed", paymentId, createdAt });
       payments.push({ id: paymentId, bookingId: id, amount: game.pricePerPlayer, currency: game.currency, status: "successful", providerRef: `seed_${id}`, createdAt });
     }
   }

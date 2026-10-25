@@ -39,7 +39,7 @@ export function GameCard({ view }: { view: GameView }) {
       <div className="mt-5">
         {status === "sold_out" ? (
           <Button variant="outline" size="xl" asChild><Link to="/games/$gameId" params={{ gameId: game.id }}>Join waitlist</Link></Button>
-        ) : status === "cancelled" ? (
+        ) : status === "cancelled" || status === "completed" ? (
           <Button variant="outline" size="xl" asChild><Link to="/games/$gameId" params={{ gameId: game.id }}>View details</Link></Button>
         ) : (
           <Button size="xl" asChild><Link to="/games/$gameId" params={{ gameId: game.id }}>Join game</Link></Button>
