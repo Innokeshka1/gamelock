@@ -66,8 +66,8 @@ export interface Player {
   id: string;
   firstName: string;
   lastName: string;
-  email?: string;
-  phone?: string;
+  email?: string | undefined;
+  phone?: string | undefined;
 }
 
 export type PaymentStatus =

@@ -26,7 +26,7 @@ export const Route = createFileRoute("/organizer")({
 
 function Organizer() {
   const state = useAppState();
-  const [gameId, setGameId] = useState(state.games[0].id);
+  const [gameId, setGameId] = useState(state.games[0]?.id ?? "");
   const [tab, setTab] = useState<"players" | "payments">("players");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
