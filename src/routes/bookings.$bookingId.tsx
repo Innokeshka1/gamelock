@@ -118,7 +118,7 @@ function BookingPage() {
             <AlertDialogTitle className="text-2xl">{quote.eligible ? "Cancel your spot?" : "This booking is no longer refundable."}</AlertDialogTitle>
             <AlertDialogDescription>
               {quote.eligible
-                ? `You're cancelling more than ${p.cutoffHours} hours before the game, so you get a ${quote.refundPercent}% refund.`
+                ? `You're cancelling more than ${p.cutoffHours} hours before the game, so you get ${quote.refundPercent}% back.`
                 : `Cancellations made less than ${p.cutoffHours} hours before the game are not eligible for a refund.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
