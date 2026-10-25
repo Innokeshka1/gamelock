@@ -13,9 +13,10 @@ export interface State {
   bookings: Booking[];
   payments: Payment[];
   refunds: Refund[];
+  fetchedAt: string;
 }
 
-const empty: State = { games: [], bookings: [], payments: [], refunds: [] };
+const empty: State = { games: [], bookings: [], payments: [], refunds: [], fetchedAt: "" };
 let state = empty;
 let serverState = empty;
 let primed: State | null = null;
@@ -30,13 +31,17 @@ export function useStore<T>(selector: (s: State) => T): T {
   return useSyncExternalStore(subscribe, () => selector(state), () => selector(serverState));
 }
 
-/** Load fresh data into the store. Idempotent per data reference. */
+/**
+ * Load fresh data into the store. A snapshot older than the current one
+ * (e.g. a stale route-loader result after a mutation) never overwrites it.
+ * Listeners are notified after the current render, not during it.
+ */
 export function primeStore(next: State) {
-  if (next === primed) return;
+  if (next === primed || next.fetchedAt < state.fetchedAt) return;
   primed = next;
   state = next;
   serverState = next;
-  listeners.forEach((l) => l());
+  queueMicrotask(() => listeners.forEach((l) => l()));
 }
 
 export async function refreshStore(): Promise<void> {

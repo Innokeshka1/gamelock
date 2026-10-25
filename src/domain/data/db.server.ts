@@ -105,6 +105,8 @@ export interface AppStateData {
   bookings: Booking[];
   payments: Payment[];
   refunds: Refund[];
+  /** Server time of the fetch — lets the store ignore stale snapshots. */
+  fetchedAt: string;
 }
 
 export async function fetchState(): Promise<AppStateData> {
@@ -144,7 +146,7 @@ export async function fetchState(): Promise<AppStateData> {
     const r = refunds.filter((x) => x.paymentId === b.paymentId).at(-1);
     if (r) b.refundId = r.id;
   }
-  return { games, bookings, payments, refunds };
+  return { games, bookings, payments, refunds, fetchedAt: new Date().toISOString() };
 }
 
 export async function fetchGameMeta(gameId: string): Promise<{ title: string; venue: string; city: string } | null> {
