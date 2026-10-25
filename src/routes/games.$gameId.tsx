@@ -3,7 +3,7 @@ import { Calendar, Clock, MapPin, Navigation, Users, Wallet } from "lucide-react
 import { toast } from "sonner";
 import { ActionBar, AppHeader, CapacityBar, InfoRow, Page, Section, StatusBadge } from "@/components/gamelock/ui";
 import { Button } from "@/components/ui/button";
-import { demoGames } from "@/domain/demo-data";
+import { getGameMeta } from "@/domain/data/api";
 import { longDate, timeRange } from "@/domain/format";
 import { canBook, spotsLeft } from "@/domain/game-logic";
 import { formatMoney } from "@/domain/money";
@@ -11,10 +11,10 @@ import { useAppState, viewGame } from "@/domain/store";
 import { statusMessage } from "@/domain/status-message";
 
 export const Route = createFileRoute("/games/$gameId")({
-  loader: ({ params }) => {
-    const game = demoGames.find((g) => g.id === params.gameId);
-    if (!game) throw notFound();
-    return { title: game.title, venue: game.venue.name, city: game.venue.city };
+  loader: async ({ params }) => {
+    const meta = await getGameMeta({ data: { gameId: params.gameId } });
+    if (!meta) throw notFound();
+    return meta;
   },
   head: ({ loaderData }) => ({
     meta: [
