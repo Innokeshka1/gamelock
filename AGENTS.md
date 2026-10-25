@@ -13,4 +13,4 @@
 - Business logic lives in `src/domain/` (types, game status, refunds, money, payments) and must stay UI-free; routes only call store actions/selectors — keeps logic testable and reusable.
 - Payments go through the `PaymentProvider` interface (`src/domain/payments`); swap the mock for a real provider (e.g. Stellar) without touching UI.
 - No sport/city/currency/price/limit is hardcoded in logic; all come from `Game` config. Money is integer minor units, formatted via `src/domain/money.ts`.
-- Data is an in-memory prototype store (`src/domain/store.ts`); replace with a real backend later.
+- Lovable Cloud is connected (database, auth, storage, server functions). Data still flows through the in-memory store (`src/domain/store.ts`); persisting it goes behind that same store API via server functions, so routes and UI keep working unchanged.
