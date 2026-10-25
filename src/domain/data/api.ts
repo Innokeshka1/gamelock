@@ -3,7 +3,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { NewGameInput, Player } from "../types";
 
-export const getAppState = createServerFn({ method: "GET" }).handler(async () => {
+// POST so the browser never serves a cached snapshot — state changes constantly.
+export const getAppState = createServerFn({ method: "POST" }).handler(async () => {
   const { fetchState } = await import("./db.server");
   return fetchState();
 });
