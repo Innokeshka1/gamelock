@@ -8,7 +8,7 @@ import { longDate, timeRange } from "@/domain/format";
 import { canBook, spotsLeft } from "@/domain/game-logic";
 import { formatMoney } from "@/domain/money";
 import { useAppState, viewGame } from "@/domain/store";
-import type { Game, GameStatus } from "@/domain/types";
+import { statusMessage } from "@/domain/status-message";
 
 export const Route = createFileRoute("/games/$gameId")({
   loader: ({ params }) => {
@@ -26,21 +26,6 @@ export const Route = createFileRoute("/games/$gameId")({
   }),
   component: GameDetails,
 });
-
-export function statusMessage(game: Game, status: GameStatus) {
-  switch (status) {
-    case "pending":
-      return `This game will be confirmed once ${game.minPlayers} players have booked and paid.`;
-    case "confirmed":
-      return `Minimum of ${game.minPlayers} players reached. This game is happening.`;
-    case "sold_out":
-      return "All spots are taken. Join the waitlist to hear if one opens up.";
-    case "cancelled":
-      return game.cancelReason === "organizer"
-        ? "The organizer cancelled this game. All payments will be fully refunded."
-        : "The minimum number of players was not reached. Your payment will be fully refunded.";
-  }
-}
 
 function GameDetails() {
   const { gameId } = Route.useParams();
