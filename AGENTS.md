@@ -8,3 +8,9 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+## Architecture
+- Business logic lives in `src/domain/` (types, game status, refunds, money, payments) and must stay UI-free; routes only call store actions/selectors — keeps logic testable and reusable.
+- Payments go through the `PaymentProvider` interface (`src/domain/payments`); swap the mock for a real provider (e.g. Stellar) without touching UI.
+- No sport/city/currency/price/limit is hardcoded in logic; all come from `Game` config. Money is integer minor units, formatted via `src/domain/money.ts`.
+- Data is an in-memory prototype store (`src/domain/store.ts`); replace with a real backend later.

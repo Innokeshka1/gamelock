@@ -10,33 +10,102 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as OrganizerRouteImport } from './routes/organizer'
+import { Route as BookGameIdRouteImport } from './routes/book.$gameId'
+import { Route as BookingsBookingIdRouteImport } from './routes/bookings.$bookingId'
+import { Route as CheckoutBookingIdRouteImport } from './routes/checkout.$bookingId'
+import { Route as GamesGameIdRouteImport } from './routes/games.$gameId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OrganizerRoute = OrganizerRouteImport.update({
+  id: '/organizer',
+  path: '/organizer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BookGameIdRoute = BookGameIdRouteImport.update({
+  id: '/book/$gameId',
+  path: '/book/$gameId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BookingsBookingIdRoute = BookingsBookingIdRouteImport.update({
+  id: '/bookings/$bookingId',
+  path: '/bookings/$bookingId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CheckoutBookingIdRoute = CheckoutBookingIdRouteImport.update({
+  id: '/checkout/$bookingId',
+  path: '/checkout/$bookingId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GamesGameIdRoute = GamesGameIdRouteImport.update({
+  id: '/games/$gameId',
+  path: '/games/$gameId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/organizer': typeof OrganizerRoute
+  '/book/$gameId': typeof BookGameIdRoute
+  '/bookings/$bookingId': typeof BookingsBookingIdRoute
+  '/checkout/$bookingId': typeof CheckoutBookingIdRoute
+  '/games/$gameId': typeof GamesGameIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/organizer': typeof OrganizerRoute
+  '/book/$gameId': typeof BookGameIdRoute
+  '/bookings/$bookingId': typeof BookingsBookingIdRoute
+  '/checkout/$bookingId': typeof CheckoutBookingIdRoute
+  '/games/$gameId': typeof GamesGameIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/organizer': typeof OrganizerRoute
+  '/book/$gameId': typeof BookGameIdRoute
+  '/bookings/$bookingId': typeof BookingsBookingIdRoute
+  '/checkout/$bookingId': typeof CheckoutBookingIdRoute
+  '/games/$gameId': typeof GamesGameIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/organizer'
+    | '/book/$gameId'
+    | '/bookings/$bookingId'
+    | '/checkout/$bookingId'
+    | '/games/$gameId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/organizer'
+    | '/book/$gameId'
+    | '/bookings/$bookingId'
+    | '/checkout/$bookingId'
+    | '/games/$gameId'
+  id:
+    | '__root__'
+    | '/'
+    | '/organizer'
+    | '/book/$gameId'
+    | '/bookings/$bookingId'
+    | '/checkout/$bookingId'
+    | '/games/$gameId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  OrganizerRoute: typeof OrganizerRoute
+  BookGameIdRoute: typeof BookGameIdRoute
+  BookingsBookingIdRoute: typeof BookingsBookingIdRoute
+  CheckoutBookingIdRoute: typeof CheckoutBookingIdRoute
+  GamesGameIdRoute: typeof GamesGameIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +117,51 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/organizer': {
+      id: '/organizer'
+      path: '/organizer'
+      fullPath: '/organizer'
+      preLoaderRoute: typeof OrganizerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/book/$gameId': {
+      id: '/book/$gameId'
+      path: '/book/$gameId'
+      fullPath: '/book/$gameId'
+      preLoaderRoute: typeof BookGameIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bookings/$bookingId': {
+      id: '/bookings/$bookingId'
+      path: '/bookings/$bookingId'
+      fullPath: '/bookings/$bookingId'
+      preLoaderRoute: typeof BookingsBookingIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/checkout/$bookingId': {
+      id: '/checkout/$bookingId'
+      path: '/checkout/$bookingId'
+      fullPath: '/checkout/$bookingId'
+      preLoaderRoute: typeof CheckoutBookingIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/games/$gameId': {
+      id: '/games/$gameId'
+      path: '/games/$gameId'
+      fullPath: '/games/$gameId'
+      preLoaderRoute: typeof GamesGameIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  OrganizerRoute: OrganizerRoute,
+  BookGameIdRoute: BookGameIdRoute,
+  BookingsBookingIdRoute: BookingsBookingIdRoute,
+  CheckoutBookingIdRoute: CheckoutBookingIdRoute,
+  GamesGameIdRoute: GamesGameIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
