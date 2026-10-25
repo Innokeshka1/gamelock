@@ -8,6 +8,13 @@
       "when": 1792941433873,
       "tag": "0000_create_gamelock_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792941520152,
+      "tag": "0001_seed_demo_games",
+      "breakpoints": true
     }
   ]
 }
