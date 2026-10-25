@@ -80,8 +80,8 @@ export function seedBookings(): { bookings: Booking[]; payments: Payment[] } {
   const bookings: Booking[] = [];
   const payments: Payment[] = [];
   for (const game of demoGames) {
-    for (let i = 0; i < counts[game.id]; i++) {
-      const [firstName, lastName] = names[i].split(" ");
+    for (let i = 0; i < (counts[game.id] ?? 0); i++) {
+      const [firstName = "", lastName = ""] = (names[i] ?? "").split(" ");
       const id = `bk_${game.id}_${i}`;
       const paymentId = `pay_${game.id}_${i}`;
       const createdAt = "2026-10-20T10:00:00Z";

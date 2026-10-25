@@ -3,7 +3,7 @@ import { demoGames } from "./demo-data";
 import { computeGameStatus } from "./game-logic";
 import { quoteGameCancellation, quotePlayerCancellation } from "./refund";
 
-const game = demoGames[0]; // min 10, max 15, €7, starts 2026-10-29T20:00Z
+const game = demoGames[0]!; // min 10, max 15, €7, starts 2026-10-29T20:00Z
 const early = new Date("2026-10-25T12:00:00Z");
 
 describe("game status", () => {
