@@ -4,14 +4,14 @@ const fmt = (game: Game, opts: Intl.DateTimeFormatOptions) => (iso: string) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: game.venue.timeZone, ...opts }).format(new Date(iso));
 
 export function shortDate(game: Game) {
-  return fmt(game, { weekday: "long", month: "short", day: "numeric" })(game.startsAt).replace(/(\w+) (\d+) (\w+)/, "$1, $3 $2");
+  const g = (o: Intl.DateTimeFormatOptions) => fmt(game, o)(game.startsAt);
+  return `${g({ weekday: "long" })}, ${g({ month: "short" })} ${g({ day: "numeric" })}`;
 }
 
 export function longDate(game: Game) {
-  const d = new Date(game.startsAt);
   const weekday = fmt(game, { weekday: "long" })(game.startsAt);
   const month = fmt(game, { month: "long" })(game.startsAt);
-  const day = fmt(game, { day: "numeric" })(d.toISOString());
+  const day = fmt(game, { day: "numeric" })(game.startsAt);
   return `${weekday}, ${month} ${day}`;
 }
 

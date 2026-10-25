@@ -76,7 +76,7 @@ const names = [
 ];
 
 export function seedBookings(): { bookings: Booking[]; payments: Payment[] } {
-  const counts: Record<string, number> = { "pickup-lisbon-thu": 11, "pickup-lisbon-fri": 15, "sunday-lisbon": 7 };
+  const counts: Record<string, number> = { "pickup-lisbon-thu": 12, "pickup-lisbon-fri": 15, "sunday-lisbon": 7 };
   const bookings: Booking[] = [];
   const payments: Payment[] = [];
   for (const game of demoGames) {
