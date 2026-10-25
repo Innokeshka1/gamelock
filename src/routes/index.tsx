@@ -16,7 +16,8 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  const views = useStore((s) => s.games).map((g) => viewGame({ games: [], bookings: [], payments: [], refunds: [], ...useStoreSnapshot() }, g));
+  const state = useStore((s) => s);
+  const views = state.games.map((g) => viewGame(state, g));
   return (
     <>
       <AppHeader right={<Link to="/organizer" className="text-sm font-semibold text-muted-foreground hover:text-foreground">Organizer</Link>} />
@@ -29,8 +30,4 @@ function Index() {
       </Page>
     </>
   );
-}
-
-function useStoreSnapshot() {
-  return useStore((s) => s);
 }

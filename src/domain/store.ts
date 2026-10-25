@@ -112,3 +112,7 @@ export async function cancelGame(gameId: string): Promise<void> {
     refunds: [...state.refunds, ...refunds],
   });
 }
+
+export function useAppState(): State {
+  return useStore((s) => s);
+}
