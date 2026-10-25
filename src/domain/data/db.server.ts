@@ -60,8 +60,8 @@ function toGame(row: GameRow): Game {
     },
     organizerFeePercent: row.organizer_fee_percentage,
     whatToBring: row.what_to_bring,
-    cancelledAt: row.cancelled_at ?? undefined,
-    cancelReason: row.cancel_reason === "organizer" || row.cancel_reason === "min_not_reached" ? row.cancel_reason : undefined,
+    ...(row.cancelled_at ? { cancelledAt: row.cancelled_at } : {}),
+    ...(row.cancel_reason === "organizer" || row.cancel_reason === "min_not_reached" ? { cancelReason: row.cancel_reason } : {}),
   };
 }
 
@@ -79,7 +79,7 @@ const toPayment = (row: PaymentRow): Payment => ({
   amount: row.amount,
   currency: currencyOf(row.currency),
   status: row.status,
-  providerRef: row.external_reference ?? undefined,
+  ...(row.external_reference ? { providerRef: row.external_reference } : {}),
   createdAt: row.created_at,
 });
 
