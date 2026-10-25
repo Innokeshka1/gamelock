@@ -22,9 +22,28 @@ let serverState = empty;
 let primed: State | null = null;
 const listeners = new Set<() => void>();
 
+// Re-render at lifecycle boundaries even when a page is left open.
+let lifecycleTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleLifecycleUpdate() {
+  clearTimeout(lifecycleTimer);
+  if (!listeners.size) return;
+  const now = Date.now();
+  const next = Math.min(...state.games.flatMap((g) => [Date.parse(g.endsAt), Date.parse(g.confirmationDeadline) + 1]).filter((time) => time > now));
+  if (!Number.isFinite(next)) return;
+  lifecycleTimer = setTimeout(() => {
+    state = { ...state };
+    listeners.forEach((l) => l());
+    scheduleLifecycleUpdate();
+  }, Math.min(next - now, 2_147_483_647));
+}
+
 const subscribe = (l: () => void) => {
   listeners.add(l);
-  return () => listeners.delete(l);
+  scheduleLifecycleUpdate();
+  return () => {
+    listeners.delete(l);
+    if (!listeners.size) clearTimeout(lifecycleTimer);
+  };
 };
 
 export function useStore<T>(selector: (s: State) => T): T {
@@ -44,6 +63,7 @@ export function primeStore(next: State | undefined | null) {
   primed = next;
   state = next;
   serverState = next;
+  scheduleLifecycleUpdate();
   queueMicrotask(() => listeners.forEach((l) => l()));
 }
 

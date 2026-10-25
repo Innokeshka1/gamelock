@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { shortDate, timeRange } from "@/domain/format";
+import { canCancelGame } from "@/domain/game-logic";
 import { formatMoney } from "@/domain/money";
 import { cancelGame, createGame, useAppState, viewGame } from "@/domain/store";
 import type { NewGameInput } from "@/domain/types";
@@ -63,12 +64,17 @@ function Organizer() {
   const locked = rows.filter((r) => r.b.status === "confirmed" && r.p.status === "successful").reduce((n, r) => n + r.p.amount, 0);
 
   async function confirmCancel() {
-    if (!game) return;
+    if (!game || !view || busy || !canCancelGame(view.status)) return;
     setBusy(true);
-    await cancelGame(game.id);
-    setBusy(false);
-    setOpen(false);
-    toast.success("Game cancelled", { description: "All players are being fully refunded." });
+    try {
+      await cancelGame(game.id);
+      setOpen(false);
+      toast.success("Game cancelled", { description: "All players are being fully refunded." });
+    } catch {
+      toast.error("Could not cancel the game. Please try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function publish(e: FormEvent) {
@@ -158,8 +164,8 @@ function Organizer() {
               </div>
               <div className="mt-4"><CapacityBar paid={view.paid} min={game.minPlayers} max={game.maxPlayers} /></div>
               <div className="mt-5 flex flex-wrap gap-2">
-                <Button variant="outline" onClick={() => toast("Editing games is coming soon")}><Pencil /> Edit game</Button>
-                {view.status !== "cancelled" && <Button variant="outline" className="text-destructive" onClick={() => setOpen(true)}>Cancel game</Button>}
+                <Button variant="outline" disabled={!canCancelGame(view.status)} onClick={() => toast("Editing games is coming soon")}><Pencil /> Edit game</Button>
+                {canCancelGame(view.status) && <Button variant="outline" className="text-destructive" onClick={() => setOpen(true)}>Cancel game</Button>}
               </div>
             </div>
 
@@ -195,7 +201,7 @@ function Organizer() {
             <AlertDialogDescription>All players will receive a full refund. This can't be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2">
-            <Button variant="destructive" className="h-12 rounded-xl" onClick={confirmCancel} disabled={busy}>{busy && <Loader2 className="animate-spin" />} Cancel game & refund all</Button>
+            <Button variant="destructive" className="h-12 rounded-xl" onClick={confirmCancel} disabled={busy || !view || !canCancelGame(view.status)}>{busy && <Loader2 className="animate-spin" />} Cancel game & refund all</Button>
             <AlertDialogCancel className="h-12 rounded-xl">Keep game</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>

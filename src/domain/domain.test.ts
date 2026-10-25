@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { demoGames } from "./demo-data";
-import { computeGameStatus } from "./game-logic";
+import { demoGames, seedBookings } from "./demo-data";
+import { canBook, canCancelBooking, canCancelGame, canPayBooking, computeGameStatus, isBookingPaid } from "./game-logic";
 import { quoteGameCancellation, quotePlayerCancellation } from "./refund";
 
 const game = demoGames[0]!; // min 10, max 15, €7, starts 2026-10-29T20:00Z
@@ -30,4 +30,41 @@ describe("refunds", () => {
     expect(q.refund).toBe(0);
   });
   it("full refund when game cancelled", () => expect(quoteGameCancellation(game, 700).refund).toBe(700));
+});
+
+
+describe("lifecycle action guards", () => {
+  const seed = seedBookings();
+  const booking = { ...seed.bookings[0]!, status: "pending" as const };
+  const payment = { ...seed.payments[0]!, status: "pending" as const };
+
+  it("completes at the end time, including full games", () => {
+    expect(computeGameStatus(game, game.maxPlayers, new Date(game.endsAt))).toBe("completed");
+  });
+
+  it("preserves a cancelled game's history after its end time", () => {
+    expect(computeGameStatus({ ...game, cancelledAt: early.toISOString() }, 0, new Date(game.endsAt))).toBe("cancelled");
+  });
+
+  it.each(["cancelled", "completed"] as const)("blocks all mutations on %s games", (status) => {
+    expect(canBook(status)).toBe(false);
+    expect(canCancelGame(status)).toBe(false);
+    expect(canCancelBooking(status, booking)).toBe(false);
+    expect(canPayBooking(status, booking, payment)).toBe(false);
+  });
+
+  it("allows pending payments and retries but not duplicate payments", () => {
+    expect(canPayBooking("confirmed", booking, payment)).toBe(true);
+    expect(canPayBooking("confirmed", booking, { ...payment, status: "failed" })).toBe(true);
+    expect(canPayBooking("confirmed", booking, { ...payment, status: "successful" })).toBe(false);
+    expect(canPayBooking("sold_out", booking, payment)).toBe(false);
+    expect(canPayBooking("confirmed", { ...booking, status: "cancelled" }, payment)).toBe(false);
+  });
+
+  it("requires both a confirmed booking and a successful payment for success", () => {
+    expect(isBookingPaid(booking, payment)).toBe(false);
+    expect(isBookingPaid(booking, { ...payment, status: "successful" })).toBe(false);
+    expect(isBookingPaid({ ...booking, status: "confirmed" }, payment)).toBe(false);
+    expect(isBookingPaid({ ...booking, status: "confirmed" }, { ...payment, status: "successful" })).toBe(true);
+  });
 });

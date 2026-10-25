@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { shortDate, startTime } from "@/domain/format";
 import { formatMoney, formatMoneyExact } from "@/domain/money";
 import { policySummary } from "@/domain/refund";
-import { payBooking, useAppState } from "@/domain/store";
+import { canPayBooking } from "@/domain/game-logic";
+import { payBooking, useAppState, viewGame } from "@/domain/store";
 
 export const Route = createFileRoute("/checkout/$bookingId")({
   head: () => ({
@@ -39,13 +40,21 @@ function Checkout() {
     );
   }
 
+  const payable = canPayBooking(viewGame(state, game).status, booking, payment);
+
   async function pay() {
+    if (busy || !payable) return;
     setBusy(true);
     setFailed(false);
-    const ok = await payBooking(bookingId);
-    setBusy(false);
-    if (ok) navigate({ to: "/bookings/$bookingId", params: { bookingId }, replace: true });
-    else setFailed(true);
+    try {
+      const ok = await payBooking(bookingId);
+      if (ok) await navigate({ to: "/bookings/$bookingId", params: { bookingId }, replace: true });
+      else setFailed(true);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -67,10 +76,10 @@ function Checkout() {
           <p>{policySummary(game)}</p>
         </div>
 
-        {failed && <p className="rounded-xl bg-danger-soft p-4 text-sm font-semibold text-destructive">Payment didn't go through. You haven't been charged — please try again.</p>}
+        {failed && <p className="rounded-xl bg-danger-soft p-4 text-sm font-semibold text-destructive">Could not confirm payment. Check your booking status before trying again.</p>}
       </Page>
       <ActionBar>
-        <Button size="xl" onClick={pay} disabled={busy}>
+        <Button size="xl" onClick={pay} disabled={busy || !payable}>
           {busy ? <><Loader2 className="animate-spin" /> Processing…</> : <><Lock /> Pay {formatMoney(payment.amount, payment.currency)}</>}
         </Button>
         <p className="text-center text-xs text-muted-foreground">Demo checkout — no real payment is taken.</p>

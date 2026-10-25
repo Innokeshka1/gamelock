@@ -2,6 +2,7 @@
 // so the rest of the app never talks to the database directly.
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { canBook, canCancelGame, computeGameStatus } from "../game-logic";
 import { paymentProvider } from "../payments/mock-provider";
 import { quoteGameCancellation, quotePlayerCancellation } from "../refund";
 import type { Booking, Currency, Game, NewGameInput, Payment, Player, Refund } from "../types";
@@ -163,9 +164,19 @@ async function fetchGameRow(db: ReturnType<typeof createDb>, gameId: string): Pr
   return data;
 }
 
+// Recheck lifecycle on the server, including requests from stale or direct URLs.
+async function currentGameStatus(db: ReturnType<typeof createDb>, game: Game) {
+  const { data, error } = await db.from("bookings").select("*, payments(*)").eq("game_id", game.id).eq("status", "confirmed");
+  if (error) throw error;
+  const paid = (data as BookingJoin[]).reduce((count, row) =>
+    count + (one(row.payments)?.status === "successful" ? row.spots : 0), 0);
+  return computeGameStatus(game, paid, new Date());
+}
+
 export async function createBookingRecord(gameId: string, player: Omit<Player, "id">): Promise<string> {
   const db = createDb();
   const game = await fetchGameRow(db, gameId);
+  if (!canBook(await currentGameStatus(db, toGame(game)))) throw new Error("This game is not bookable.");
 
   const { data: playerRow, error: playerErr } = await db
     .from("players")
@@ -199,6 +210,18 @@ export async function payBookingRecord(bookingId: string): Promise<boolean> {
   if (error) throw error;
   if (!payment?.external_reference) return false;
 
+  const { data: booking, error: bookingError } = await db.from("bookings").select("*").eq("id", bookingId).maybeSingle();
+  if (bookingError) throw bookingError;
+  if (!booking) throw new Error("Booking not found.");
+  const game = toGame(await fetchGameRow(db, booking.game_id));
+  const gameStatus = await currentGameStatus(db, game);
+  if (!canCancelGame(gameStatus)) throw new Error("This game is no longer active.");
+  if (booking.status === "confirmed" && payment.status === "successful") return true;
+  if (booking.status !== "pending" || !canBook(gameStatus) ||
+      (payment.status !== "pending" && payment.status !== "failed")) {
+    throw new Error("This booking cannot be paid.");
+  }
+
   const { status } = await paymentProvider.confirmPayment(payment.external_reference);
   const now = new Date().toISOString();
   const { error: payErr } = await db.from("payments").update({ status, updated_at: now }).eq("id", payment.id);
@@ -217,6 +240,8 @@ export async function cancelBookingRecord(bookingId: string): Promise<void> {
   const payment = one((booking as BookingJoin | null)?.payments ?? null);
   if (!booking || !payment) return;
   const game = toGame(await fetchGameRow(db, booking.game_id));
+  if (!canCancelGame(await currentGameStatus(db, game))) throw new Error("This game is no longer cancellable.");
+  if (booking.status !== "pending" && booking.status !== "confirmed") return;
   const now = new Date().toISOString();
 
   const quote = quotePlayerCancellation(game, payment.amount, new Date());
@@ -234,6 +259,7 @@ export async function cancelBookingRecord(bookingId: string): Promise<void> {
 export async function cancelGameRecord(gameId: string): Promise<void> {
   const db = createDb();
   const game = toGame(await fetchGameRow(db, gameId));
+  if (!canCancelGame(await currentGameStatus(db, game))) throw new Error("This game is no longer cancellable.");
   const { data: rows, error } = await db.from("bookings").select("*, payments(*)").eq("game_id", gameId).eq("status", "confirmed");
   if (error) throw error;
 
@@ -248,7 +274,7 @@ export async function cancelGameRecord(gameId: string): Promise<void> {
     const { error: payErr } = await db.from("payments").update({ status: "refund_pending", updated_at: now }).eq("id", payment.id);
     if (payErr) throw payErr;
   }
-  const { error: bookErr } = await db.from("bookings").update({ status: "cancelled", cancelled_at: now }).eq("game_id", gameId).eq("status", "confirmed");
+  const { error: bookErr } = await db.from("bookings").update({ status: "cancelled", cancelled_at: now }).eq("game_id", gameId).in("status", ["pending", "confirmed"]);
   if (bookErr) throw bookErr;
   const { error: gameErr } = await db.from("games").update({ status: "cancelled", cancelled_at: now, cancel_reason: "organizer", updated_at: now }).eq("id", gameId);
   if (gameErr) throw gameErr;

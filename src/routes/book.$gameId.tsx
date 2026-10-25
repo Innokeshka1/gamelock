@@ -6,7 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { shortDate, startTime } from "@/domain/format";
 import { formatMoney } from "@/domain/money";
-import { createBooking, useAppState } from "@/domain/store";
+import { toast } from "sonner";
+import { canBook } from "@/domain/game-logic";
+import { createBooking, useAppState, viewGame } from "@/domain/store";
 
 export const Route = createFileRoute("/book/$gameId")({
   head: () => ({
@@ -23,23 +25,31 @@ export const Route = createFileRoute("/book/$gameId")({
 function PlayerDetails() {
   const { gameId } = Route.useParams();
   const navigate = useNavigate();
-  const game = useAppState().games.find((g) => g.id === gameId);
+  const state = useAppState();
+  const game = state.games.find((g) => g.id === gameId);
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
   const [busy, setBusy] = useState(false);
   if (!game) return null;
+  const bookable = canBook(viewGame(state, game).status);
   const valid = form.firstName.trim() && form.lastName.trim();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!valid || busy) return;
+    if (!valid || busy || !bookable) return;
     setBusy(true);
-    const bookingId = await createBooking(gameId, {
-      firstName: form.firstName.trim(),
-      lastName: form.lastName.trim(),
-      email: form.email.trim() || undefined,
-      phone: form.phone.trim() || undefined,
-    });
-    navigate({ to: "/checkout/$bookingId", params: { bookingId } });
+    try {
+      const bookingId = await createBooking(gameId, {
+        firstName: form.firstName.trim(),
+        lastName: form.lastName.trim(),
+        email: form.email.trim() || undefined,
+        phone: form.phone.trim() || undefined,
+      });
+      await navigate({ to: "/checkout/$bookingId", params: { bookingId } });
+    } catch {
+      toast.error("Could not create your booking. Please try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   const field = (key: keyof typeof form, label: string, opts: { optional?: boolean; type?: string; auto?: string }) => (
@@ -77,7 +87,7 @@ function PlayerDetails() {
         </div>
       </Page>
       <ActionBar>
-        <Button type="submit" size="xl" disabled={!valid || busy}>Continue to payment</Button>
+        <Button type="submit" size="xl" disabled={!valid || busy || !bookable}>Continue to payment</Button>
       </ActionBar>
     </form>
   );

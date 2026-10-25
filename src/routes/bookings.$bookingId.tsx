@@ -1,5 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { CalendarPlus, Check, Loader2, Navigation, XCircle } from "lucide-react";
+import { toast } from "sonner";
+import { canCancelBooking, canPayBooking, isBookingPaid } from "@/domain/game-logic";
 import { useState } from "react";
 import { AppHeader, Page, Section, StatusBadge, statusLabel } from "@/components/gamelock/ui";
 import {
@@ -37,16 +39,25 @@ function BookingPage() {
   const { paid, status } = viewGame(state, game);
   const refund = state.refunds.find((r) => r.id === booking.refundId);
   const gameRefund = state.refunds.find((r) => r.paymentId === payment.id && r.reason === "game_cancelled");
-  const quote = quotePlayerCancellation(game, payment.amount, new Date());
+  const quote = quotePlayerCancellation(game, payment.status === "successful" ? payment.amount : 0, new Date());
   const p = game.cancellationPolicy;
-  const cancelled = booking.status === "cancelled";
+  const cancelled = booking.status === "cancelled" || booking.status === "refunded";
+  const paidBooking = isBookingPaid(booking, payment);
+  const cancellable = canCancelBooking(status, booking);
+  const payable = canPayBooking(status, booking, payment);
 
   async function confirmCancel() {
+    if (busy || !cancellable) return;
     setBusy(true);
-    await cancelBooking(bookingId);
-    setBusy(false);
-    setOpen(false);
-    window.scrollTo({ top: 0 });
+    try {
+      await cancelBooking(bookingId);
+      setOpen(false);
+      window.scrollTo({ top: 0 });
+    } catch {
+      toast.error("Could not cancel your booking. Please try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -58,7 +69,7 @@ function BookingPage() {
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-muted"><XCircle className="h-10 w-10 text-muted-foreground" /></div>
             <h1 className="mt-5 text-3xl font-extrabold">Booking cancelled</h1>
             <p className="mt-2 font-semibold">
-              {refund ? `${formatMoneyExact(refund.amount, refund.currency)} refund initiated` : "No refund — cancelled within the non-refundable window"}
+              {refund ? `${formatMoneyExact(refund.amount, refund.currency)} refund initiated` : (payment.status === "pending" || payment.status === "failed" ? "No payment was completed." : "No refund — cancelled within the non-refundable window")}
             </p>
             {refund && <p className="mt-1 text-sm text-muted-foreground">It usually arrives within 5–10 business days.</p>}
           </div>
@@ -66,8 +77,19 @@ function BookingPage() {
           <div className="py-6 text-center">
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-danger-soft"><XCircle className="h-10 w-10 text-destructive" /></div>
             <h1 className="mt-5 text-3xl font-extrabold">Game cancelled</h1>
-            <p className="mt-2 text-muted-foreground">Your payment will be fully refunded.</p>
+            <p className="mt-2 text-muted-foreground">{payment.status === "pending" || payment.status === "failed" ? "No payment was completed." : "Your payment will be fully refunded."}</p>
             {gameRefund && <p className="mt-1 font-semibold">{formatMoneyExact(gameRefund.amount, gameRefund.currency)} refund initiated</p>}
+          </div>
+        ) : status === "completed" ? (
+          <div className="py-6 text-center">
+            <h1 className="mt-5 text-3xl font-extrabold">Game completed</h1>
+            <p className="mt-2 text-muted-foreground">This is your booking history.</p>
+          </div>
+        ) : !paidBooking ? (
+          <div className="py-6 text-center">
+            <h1 className="mt-5 text-3xl font-extrabold">{payment.status === "failed" ? "Payment failed" : "Booking pending"}</h1>
+            <p className="mt-2 text-muted-foreground">Your spot is not confirmed until payment succeeds.</p>
+            {payable && <Button className="mt-4" asChild><Link to="/checkout/$bookingId" params={{ bookingId }}>Continue to payment</Link></Button>}
           </div>
         ) : (
           <div className="py-6 text-center">
@@ -87,16 +109,16 @@ function BookingPage() {
           <div className="my-4 border-t" />
           <dl className="grid grid-cols-2 gap-y-3 text-sm">
             <dt className="text-muted-foreground">Player</dt><dd className="text-right font-semibold">{booking.player.firstName} {booking.player.lastName}</dd>
-            <dt className="text-muted-foreground">Payment</dt><dd className="text-right font-semibold">{formatMoney(payment.amount, payment.currency)} paid</dd>
+            <dt className="text-muted-foreground">Payment</dt><dd className="text-right font-semibold">{formatMoney(payment.amount, payment.currency)} {payment.status === "successful" ? "paid" : payment.status.replaceAll("_", " ")}</dd>
             <dt className="text-muted-foreground">Game status</dt><dd className="text-right"><StatusBadge status={status} /></dd>
             <dt className="text-muted-foreground">Spots</dt><dd className="tabular text-right font-semibold">{paid} / {game.maxPlayers} booked</dd>
           </dl>
-          {status === "pending" && !cancelled && (
+          {status === "pending" && paidBooking && (
             <p className="mt-4 rounded-xl bg-warning-soft p-3 text-sm text-warning">{statusLabel.pending}: needs {game.minPlayers - paid} more player{game.minPlayers - paid === 1 ? "" : "s"}. If it doesn't happen, you get a full refund.</p>
           )}
         </div>
 
-        {!cancelled && status !== "cancelled" && (
+        {paidBooking && status !== "cancelled" && status !== "completed" && (
           <>
             <div className="grid grid-cols-2 gap-3">
               <Button variant="outline" className="h-12 rounded-xl" asChild><a href={calendarUrl(game)} target="_blank" rel="noreferrer"><CalendarPlus /> Add to calendar</a></Button>
@@ -105,9 +127,10 @@ function BookingPage() {
             <Section title="What to bring">
               <ul className="space-y-1.5 text-sm">{game.whatToBring.map((i) => <li key={i}>• {i}</li>)}</ul>
             </Section>
-            <button onClick={() => setOpen(true)} className="w-full py-3 text-sm font-semibold text-muted-foreground underline underline-offset-4 hover:text-destructive">Cancel booking</button>
           </>
         )}
+
+        {cancellable && <button disabled={busy || !cancellable} onClick={() => setOpen(true)} className="w-full py-3 text-sm font-semibold text-muted-foreground underline underline-offset-4 hover:text-destructive">Cancel booking</button>}
 
         {(cancelled || status === "cancelled") && <Button size="xl" asChild><Link to="/">Find another game</Link></Button>}
       </Page>
@@ -128,7 +151,7 @@ function BookingPage() {
             <dt className="font-bold">Refund</dt><dd className="tabular text-right font-bold">{formatMoneyExact(quote.refund, payment.currency)}</dd>
           </dl>
           <AlertDialogFooter className="gap-2">
-            <Button variant="destructive" className="h-12 rounded-xl" onClick={confirmCancel} disabled={busy}>
+            <Button variant="destructive" className="h-12 rounded-xl" onClick={confirmCancel} disabled={busy || !cancellable}>
               {busy && <Loader2 className="animate-spin" />} Confirm cancellation
             </Button>
             <AlertDialogCancel className="h-12 rounded-xl">Keep my spot</AlertDialogCancel>

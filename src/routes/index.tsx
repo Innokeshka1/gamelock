@@ -25,8 +25,16 @@ function Index() {
         <h1 className="text-3xl font-extrabold">Upcoming games</h1>
         <p className="mt-1 text-muted-foreground">Play more. Cancel less.</p>
         <div className="mt-6 space-y-4">
-          {views.map((v) => <GameCard key={v.game.id} view={v} />)}
+          {views.filter((v) => v.status !== "completed").map((v) => <GameCard key={v.game.id} view={v} />)}
         </div>
+        {views.some((v) => v.status === "completed") && (
+          <section className="mt-6">
+            <h2 className="text-3xl font-extrabold">Past Games</h2>
+            <div className="mt-6 space-y-4">
+              {views.filter((v) => v.status === "completed").map((v) => <GameCard key={v.game.id} view={v} />)}
+            </div>
+          </section>
+        )}
       </Page>
     </>
   );
