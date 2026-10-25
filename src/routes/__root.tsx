@@ -11,6 +11,8 @@ import {
 import { useEffect, type ReactNode } from "react";
 
 import { Toaster } from "@/components/ui/sonner";
+import { getAppState } from "@/domain/data/api";
+import { primeStore } from "@/domain/store";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
@@ -75,6 +77,7 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+  loader: () => getAppState(),
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -120,6 +123,8 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  // Prime the app store with the loader's database snapshot before children render.
+  primeStore(Route.useLoaderData());
 
   return (
     <QueryClientProvider client={queryClient}>

@@ -58,9 +58,9 @@ function BookingPage() {
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-muted"><XCircle className="h-10 w-10 text-muted-foreground" /></div>
             <h1 className="mt-5 text-3xl font-extrabold">Booking cancelled</h1>
             <p className="mt-2 font-semibold">
-              {refund?.status === "initiated" ? `${formatMoneyExact(refund.amount, refund.currency)} refund initiated` : "No refund — cancelled within the non-refundable window"}
+              {refund ? `${formatMoneyExact(refund.amount, refund.currency)} refund initiated` : "No refund — cancelled within the non-refundable window"}
             </p>
-            {refund?.status === "initiated" && <p className="mt-1 text-sm text-muted-foreground">It usually arrives within 5–10 business days.</p>}
+            {refund && <p className="mt-1 text-sm text-muted-foreground">It usually arrives within 5–10 business days.</p>}
           </div>
         ) : status === "cancelled" ? (
           <div className="py-6 text-center">

@@ -1,15 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Loader2, Pencil } from "lucide-react";
-import { useState } from "react";
+import { Loader2, Pencil, Plus } from "lucide-react";
+import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { AppHeader, CapacityBar, Page, PaymentChip, StatusBadge } from "@/components/gamelock/ui";
 import {
   AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { shortDate, timeRange } from "@/domain/format";
 import { formatMoney } from "@/domain/money";
-import { cancelGame, useAppState, viewGame } from "@/domain/store";
+import { cancelGame, createGame, useAppState, viewGame } from "@/domain/store";
+import type { NewGameInput } from "@/domain/types";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/organizer")({
@@ -24,80 +28,164 @@ export const Route = createFileRoute("/organizer")({
   component: Organizer,
 });
 
+const emptyForm = {
+  title: "",
+  sport: "Basketball",
+  country: "PT",
+  city: "Lisbon",
+  venue: "",
+  date: "",
+  startTime: "20:00",
+  endTime: "22:00",
+  currency: "EUR",
+  price: "7",
+  minPlayers: "10",
+  maxPlayers: "15",
+  confirmationDeadline: "",
+  cancellationCutoffHours: "4",
+  refundPercentage: "80",
+};
+
 function Organizer() {
   const state = useAppState();
   const [gameId, setGameId] = useState(state.games[0]?.id ?? "");
   const [tab, setTab] = useState<"players" | "payments">("players");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const game = state.games.find((g) => g.id === gameId)!;
-  const { paid, status } = viewGame(state, game);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [form, setForm] = useState(emptyForm);
+  const game = state.games.find((g) => g.id === gameId) ?? state.games[0];
+  const view = game ? viewGame(state, game) : null;
   const rows = state.bookings
-    .filter((b) => b.gameId === gameId && b.status !== "awaiting_payment")
+    .filter((b) => b.gameId === game?.id && b.status !== "pending")
     .map((b) => ({ b, p: state.payments.find((p) => p.id === b.paymentId)! }));
-  const locked = rows.filter((r) => r.b.status === "active" && r.p.status === "successful").reduce((n, r) => n + r.p.amount, 0);
+  const locked = rows.filter((r) => r.b.status === "confirmed" && r.p.status === "successful").reduce((n, r) => n + r.p.amount, 0);
 
   async function confirmCancel() {
+    if (!game) return;
     setBusy(true);
-    await cancelGame(gameId);
+    await cancelGame(game.id);
     setBusy(false);
     setOpen(false);
     toast.success("Game cancelled", { description: "All players are being fully refunded." });
   }
 
+  async function publish(e: FormEvent) {
+    e.preventDefault();
+    if (createBusy) return;
+    const pricePerPlayer = Math.round(Number.parseFloat(form.price) * 100);
+    if (!form.title.trim() || !form.venue.trim() || !form.date || !form.confirmationDeadline || !(pricePerPlayer > 0)) {
+      toast.error("Fill in title, venue, date, deadline and price.");
+      return;
+    }
+    const input: NewGameInput = {
+      title: form.title.trim(),
+      sport: form.sport.trim() || "Basketball",
+      country: form.country.trim() || "PT",
+      city: form.city.trim(),
+      venue: form.venue.trim(),
+      date: form.date,
+      startTime: form.startTime,
+      endTime: form.endTime,
+      currency: form.currency.trim().toUpperCase() || "EUR",
+      pricePerPlayer,
+      minPlayers: Number.parseInt(form.minPlayers, 10) || 1,
+      maxPlayers: Number.parseInt(form.maxPlayers, 10) || 1,
+      confirmationDeadline: new Date(form.confirmationDeadline).toISOString(),
+      cancellationCutoffHours: Number.parseInt(form.cancellationCutoffHours, 10) || 0,
+      refundPercentage: Number.parseInt(form.refundPercentage, 10) || 0,
+    };
+    setCreateBusy(true);
+    try {
+      const id = await createGame(input);
+      setCreateOpen(false);
+      setForm(emptyForm);
+      setGameId(id);
+      toast.success("Game published", { description: "It's live and bookable now." });
+    } catch {
+      toast.error("Could not publish the game. Please try again.");
+    } finally {
+      setCreateBusy(false);
+    }
+  }
+
+  const field = (key: keyof typeof emptyForm, label: string, opts: { type?: string; step?: string; min?: string } = {}) => (
+    <div className="space-y-1.5">
+      <Label htmlFor={`cg-${key}`} className="text-sm font-semibold">{label}</Label>
+      <Input
+        id={`cg-${key}`}
+        type={opts.type ?? "text"}
+        step={opts.step}
+        min={opts.min}
+        value={form[key]}
+        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+        className="h-11 rounded-xl bg-card text-base"
+      />
+    </div>
+  );
+
   return (
     <>
       <AppHeader back />
       <Page className="max-w-3xl space-y-5">
-        <h1 className="text-3xl font-extrabold">Your games</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-3xl font-extrabold">Your games</h1>
+          <Button onClick={() => setCreateOpen(true)}><Plus /> New game</Button>
+        </div>
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
           {state.games.map((g) => (
-            <button key={g.id} onClick={() => setGameId(g.id)} className={cn("shrink-0 rounded-full border px-4 py-2 text-sm font-semibold", g.id === gameId ? "border-secondary bg-secondary text-secondary-foreground" : "bg-card")}>
+            <button key={g.id} onClick={() => setGameId(g.id)} className={cn("shrink-0 rounded-full border px-4 py-2 text-sm font-semibold", g.id === game?.id ? "border-secondary bg-secondary text-secondary-foreground" : "bg-card")}>
               {shortDate(g)}
             </button>
           ))}
         </div>
 
-        <div className="rounded-2xl border bg-card p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-extrabold">{game.title}</h2>
-              <div className="text-sm text-muted-foreground">{shortDate(game)} · {timeRange(game)} · {game.venue.name}</div>
-            </div>
-            <StatusBadge status={status} />
-          </div>
-          <div className="mt-5 grid grid-cols-3 gap-3">
-            <Stat label="Players" value={`${paid} / ${game.maxPlayers}`} />
-            <Stat label="Minimum" value={paid >= game.minPlayers ? `${game.minPlayers} reached` : `${paid} / ${game.minPlayers}`} />
-            <Stat label="Revenue locked" value={formatMoney(locked, game.currency)} />
-          </div>
-          <div className="mt-4"><CapacityBar paid={paid} min={game.minPlayers} max={game.maxPlayers} /></div>
-          <div className="mt-5 flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => toast("Editing games is coming soon")}><Pencil /> Edit game</Button>
-            {status !== "cancelled" && <Button variant="outline" className="text-destructive" onClick={() => setOpen(true)}>Cancel game</Button>}
-          </div>
-        </div>
-
-        <div className="flex gap-1 rounded-xl bg-muted p-1">
-          {(["players", "payments"] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)} className={cn("flex-1 rounded-lg py-2.5 text-sm font-semibold", tab === t ? "bg-card shadow-sm" : "text-muted-foreground")}>
-              {t === "players" ? "View players" : "View payments"}
-            </button>
-          ))}
-        </div>
-
-        <ul className="divide-y rounded-2xl border bg-card">
-          {rows.map(({ b, p }) => (
-            <li key={b.id} className="flex items-center justify-between gap-3 px-5 py-3.5">
-              <div className="min-w-0">
-                <div className={cn("font-semibold", b.status === "cancelled" && "text-muted-foreground line-through")}>{b.player.firstName} {b.player.lastName}</div>
-                {tab === "payments" && <div className="tabular text-xs text-muted-foreground">{formatMoney(p.amount, p.currency)} · {p.id}</div>}
-                {tab === "players" && b.status === "cancelled" && <div className="text-xs text-muted-foreground">Cancelled booking</div>}
+        {game && view && (
+          <>
+            <div className="rounded-2xl border bg-card p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-extrabold">{game.title}</h2>
+                  <div className="text-sm text-muted-foreground">{shortDate(game)} · {timeRange(game)} · {game.venue.name}</div>
+                </div>
+                <StatusBadge status={view.status} />
               </div>
-              <PaymentChip status={p.status} />
-            </li>
-          ))}
-        </ul>
+              <div className="mt-5 grid grid-cols-3 gap-3">
+                <Stat label="Players" value={`${view.paid} / ${game.maxPlayers}`} />
+                <Stat label="Minimum" value={view.paid >= game.minPlayers ? `${game.minPlayers} reached` : `${view.paid} / ${game.minPlayers}`} />
+                <Stat label="Revenue locked" value={formatMoney(locked, game.currency)} />
+              </div>
+              <div className="mt-4"><CapacityBar paid={view.paid} min={game.minPlayers} max={game.maxPlayers} /></div>
+              <div className="mt-5 flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => toast("Editing games is coming soon")}><Pencil /> Edit game</Button>
+                {view.status !== "cancelled" && <Button variant="outline" className="text-destructive" onClick={() => setOpen(true)}>Cancel game</Button>}
+              </div>
+            </div>
+
+            <div className="flex gap-1 rounded-xl bg-muted p-1">
+              {(["players", "payments"] as const).map((t) => (
+                <button key={t} onClick={() => setTab(t)} className={cn("flex-1 rounded-lg py-2.5 text-sm font-semibold", tab === t ? "bg-card shadow-sm" : "text-muted-foreground")}>
+                  {t === "players" ? "View players" : "View payments"}
+                </button>
+              ))}
+            </div>
+
+            <ul className="divide-y rounded-2xl border bg-card">
+              {rows.map(({ b, p }) => (
+                <li key={b.id} className="flex items-center justify-between gap-3 px-5 py-3.5">
+                  <div className="min-w-0">
+                    <div className={cn("font-semibold", b.status === "cancelled" && "text-muted-foreground line-through")}>{b.player.firstName} {b.player.lastName}</div>
+                    {tab === "payments" && <div className="tabular text-xs text-muted-foreground">{formatMoney(p.amount, p.currency)} · {p.id}</div>}
+                    {tab === "players" && b.status === "cancelled" && <div className="text-xs text-muted-foreground">Cancelled booking</div>}
+                  </div>
+                  <PaymentChip status={p.status} />
+                </li>
+              ))}
+              {rows.length === 0 && <li className="px-5 py-6 text-center text-sm text-muted-foreground">No bookings yet.</li>}
+            </ul>
+          </>
+        )}
       </Page>
 
       <AlertDialog open={open} onOpenChange={setOpen}>
@@ -112,6 +200,36 @@ function Organizer() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto rounded-2xl sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-2xl">Create game</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={publish} className="space-y-4">
+            {field("title", "Title")}
+            <div className="grid grid-cols-2 gap-3">
+              {field("sport", "Sport")}
+              {field("venue", "Venue")}
+              {field("city", "City")}
+              {field("country", "Country")}
+              {field("date", "Date", { type: "date" })}
+              {field("confirmationDeadline", "Confirmation deadline", { type: "datetime-local" })}
+              {field("startTime", "Start time", { type: "time" })}
+              {field("endTime", "End time", { type: "time" })}
+              {field("currency", "Currency")}
+              {field("price", "Price per player", { type: "number", step: "0.01", min: "0" })}
+              {field("minPlayers", "Minimum players", { type: "number", min: "1" })}
+              {field("maxPlayers", "Maximum players", { type: "number", min: "1" })}
+              {field("cancellationCutoffHours", "Cancellation cutoff (hours)", { type: "number", min: "0" })}
+              {field("refundPercentage", "Refund % before cutoff", { type: "number", min: "0" })}
+            </div>
+            <Button type="submit" size="xl" className="w-full" disabled={createBusy}>
+              {createBusy && <Loader2 className="animate-spin" />} Publish game
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
