@@ -8,6 +8,8 @@ export function statusMessage(game: Game, status: GameStatus) {
       return `Minimum of ${game.minPlayers} players reached. This game is happening.`;
     case "sold_out":
       return "All spots are taken. Join the waitlist to hear if one opens up.";
+    case "completed":
+      return "This game has been played. Thanks for joining!";
     case "cancelled":
       return game.cancelReason === "organizer"
         ? "The organizer cancelled this game. All payments will be fully refunded."
