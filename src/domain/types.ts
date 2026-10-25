@@ -40,7 +40,7 @@ export interface CancellationPolicy {
   refundPercentOnGameCancelled: number;
 }
 
-export type GameStatus = "pending" | "confirmed" | "sold_out" | "cancelled";
+export type GameStatus = "pending" | "confirmed" | "sold_out" | "cancelled" | "completed";
 
 export interface Game {
   id: string;
@@ -75,7 +75,7 @@ export type PaymentStatus =
   | "successful"
   | "failed"
   | "refund_pending"
-  | "refund_completed";
+  | "refunded";
 
 export interface Payment {
   id: string;
@@ -87,7 +87,7 @@ export interface Payment {
   createdAt: string;
 }
 
-export type RefundStatus = "initiated" | "completed" | "not_eligible";
+export type RefundStatus = "pending" | "completed" | "failed";
 
 export interface Refund {
   id: string;
@@ -100,7 +100,30 @@ export interface Refund {
   createdAt: string;
 }
 
-export type BookingStatus = "awaiting_payment" | "active" | "cancelled";
+export type BookingStatus = "pending" | "confirmed" | "cancelled" | "refunded";
+
+/** Input for creating a game (organizer dashboard). Price in minor units. */
+export interface NewGameInput {
+  title: string;
+  sport: string;
+  country: string;
+  city: string;
+  venue: string;
+  venueAddress?: string;
+  venueMapsUrl?: string;
+  timeZone?: string;
+  date: string; // YYYY-MM-DD, venue local
+  startTime: string; // HH:MM, venue local
+  endTime: string;
+  currency: string;
+  pricePerPlayer: number;
+  minPlayers: number;
+  maxPlayers: number;
+  confirmationDeadline: string; // ISO UTC
+  cancellationCutoffHours: number;
+  refundPercentage: number;
+  whatToBring?: string[];
+}
 
 export interface Booking {
   id: string;

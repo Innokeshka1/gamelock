@@ -44,6 +44,7 @@ const statusStyles = cva("inline-flex items-center gap-1.5 rounded-full px-2.5 p
       pending: "bg-warning-soft text-warning",
       sold_out: "bg-secondary text-secondary-foreground",
       cancelled: "bg-danger-soft text-destructive",
+      completed: "bg-muted text-muted-foreground",
     },
   },
 });
@@ -53,10 +54,11 @@ export const statusLabel: Record<GameStatus, string> = {
   pending: "Waiting for confirmation",
   sold_out: "Sold out",
   cancelled: "Game cancelled",
+  completed: "Completed",
 };
 
 export function StatusBadge({ status }: { status: GameStatus }) {
-  const Icon = { confirmed: CheckCircle2, pending: Clock, sold_out: Users, cancelled: Ban }[status];
+  const Icon = { confirmed: CheckCircle2, pending: Clock, sold_out: Users, cancelled: Ban, completed: CheckCircle2 }[status];
   return (
     <span className={statusStyles({ status })}>
       <Icon className="h-3.5 w-3.5" />
@@ -72,7 +74,7 @@ const payChip = cva("inline-flex rounded-full px-2.5 py-1 text-xs font-semibold"
       pending: "bg-warning-soft text-warning",
       failed: "bg-danger-soft text-destructive",
       refund_pending: "bg-accent text-accent-foreground",
-      refund_completed: "bg-muted text-muted-foreground",
+      refunded: "bg-muted text-muted-foreground",
     },
   },
 });
@@ -81,7 +83,7 @@ const payLabel: Record<PaymentStatus, string> = {
   pending: "Pending",
   failed: "Failed",
   refund_pending: "Refund initiated",
-  refund_completed: "Refunded",
+  refunded: "Refunded",
 };
 export function PaymentChip({ status }: { status: PaymentStatus }) {
   return <span className={payChip({ status })}>{payLabel[status]}</span>;
