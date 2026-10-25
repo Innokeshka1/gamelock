@@ -28,7 +28,7 @@ const subscribe = (l: () => void) => {
 };
 
 export function useStore<T>(selector: (s: State) => T): T {
-  return useSyncExternalStore(subscribe, () => selector(state), () => selector(serverState));
+  return useSyncExternalStore(subscribe, () => selector(state ?? empty), () => selector(serverState ?? empty));
 }
 
 /**
@@ -36,7 +36,10 @@ export function useStore<T>(selector: (s: State) => T): T {
  * (e.g. a stale route-loader result after a mutation) never overwrites it.
  * Listeners are notified after the current render, not during it.
  */
-export function primeStore(next: State) {
+export function primeStore(next: State | undefined | null) {
+  // Ignore missing or malformed snapshots (e.g. a failed loader result) —
+  // the store keeps its last good state instead of blanking the UI.
+  if (!next || !Array.isArray(next.games) || !Array.isArray(next.bookings)) return;
   if (next === primed || next.fetchedAt < state.fetchedAt) return;
   primed = next;
   state = next;
