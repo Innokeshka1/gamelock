@@ -7,4 +7,4 @@
 - [x] Root loader primes the store; game metadata from the database
 - [x] Organizer: Create Game form
 - [x] Tests pass
-- [ ] Verify booking/cancel flow end-to-end in the preview
+- [x] Verified end-to-end: book → pay → cancel with refund → create game; test data cleaned up
