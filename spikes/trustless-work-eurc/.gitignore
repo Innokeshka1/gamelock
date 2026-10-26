@@ -1,0 +1,6 @@
+node_modules/
+artifacts/
+wallets.json
+.env
+.signer.js
+.pnpm-store/

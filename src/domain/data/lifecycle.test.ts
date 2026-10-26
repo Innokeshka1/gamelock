@@ -26,9 +26,9 @@ vi.mock("@supabase/supabase-js", () => ({
     },
   }),
 }));
-vi.mock("../payments/mock-provider", () => ({ paymentProvider: {
+vi.mock("../payments/provider-factory.server", () => ({ getBookingPaymentProvider: () => ({
   confirmPayment: mocks.confirmPayment, refundPayment: mocks.refundPayment, createPayment: mocks.createPayment,
-} }));
+}) }));
 import { cancelBookingRecord, cancelGameRecord, createBookingRecord, payBookingRecord } from "./db.server";
 
 beforeEach(() => {

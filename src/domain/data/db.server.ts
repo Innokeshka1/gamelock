@@ -3,7 +3,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { canBook, canCancelGame, computeGameStatus } from "../game-logic";
-import { paymentProvider } from "../payments/mock-provider";
+import { getBookingPaymentProvider } from "../payments/provider-factory.server";
 import { quoteGameCancellation, quotePlayerCancellation } from "../refund";
 import type { Booking, Currency, Game, NewGameInput, Payment, Player, Refund } from "../types";
 
@@ -174,6 +174,7 @@ async function currentGameStatus(db: ReturnType<typeof createDb>, game: Game) {
 }
 
 export async function createBookingRecord(gameId: string, player: Omit<Player, "id">): Promise<string> {
+  const paymentProvider = getBookingPaymentProvider();
   const db = createDb();
   const game = await fetchGameRow(db, gameId);
   if (!canBook(await currentGameStatus(db, toGame(game)))) throw new Error("This game is not bookable.");
@@ -205,6 +206,7 @@ export async function createBookingRecord(gameId: string, player: Omit<Player, "
 }
 
 export async function payBookingRecord(bookingId: string): Promise<boolean> {
+  const paymentProvider = getBookingPaymentProvider();
   const db = createDb();
   const { data: payment, error } = await db.from("payments").select("*").eq("booking_id", bookingId).maybeSingle();
   if (error) throw error;
@@ -234,6 +236,7 @@ export async function payBookingRecord(bookingId: string): Promise<boolean> {
 }
 
 export async function cancelBookingRecord(bookingId: string): Promise<void> {
+  const paymentProvider = getBookingPaymentProvider();
   const db = createDb();
   const { data: booking, error } = await db.from("bookings").select("*, payments(*)").eq("id", bookingId).maybeSingle();
   if (error) throw error;
@@ -257,6 +260,7 @@ export async function cancelBookingRecord(bookingId: string): Promise<void> {
 }
 
 export async function cancelGameRecord(gameId: string): Promise<void> {
+  const paymentProvider = getBookingPaymentProvider();
   const db = createDb();
   const game = toGame(await fetchGameRow(db, gameId));
   if (!canCancelGame(await currentGameStatus(db, game))) throw new Error("This game is no longer cancellable.");

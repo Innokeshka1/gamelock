@@ -1,0 +1,16 @@
+{
+  "name": "gamelock-trustless-work-eurc-spike",
+  "private": true,
+  "type": "module",
+  "description": "Isolated hackathon spike. Trustless Work V2 beta, Stellar Testnet only.",
+  "scripts": {
+    "preflight": "node cli.mjs preflight",
+    "test": "node --test test/*.test.mjs",
+    "sign": "node signer-server.mjs"
+  },
+  "dependencies": {
+    "@stellar/freighter-api": "6.0.1",
+    "@stellar/stellar-sdk": "17.3.0",
+    "esbuild": "0.28.2"
+  }
+}
