@@ -43,7 +43,7 @@ function BookingPage() {
   const p = game.cancellationPolicy;
   const cancelled = booking.status === "cancelled" || booking.status === "refunded";
   const paidBooking = isBookingPaid(booking, payment);
-  const cancellable = canCancelBooking(status, booking);
+  const cancellable = canCancelBooking(status, booking) && (payment.provider !== "stellar-native" || paidBooking);
   const payable = canPayBooking(status, booking, payment);
 
   async function confirmCancel() {
@@ -69,15 +69,15 @@ function BookingPage() {
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-muted"><XCircle className="h-10 w-10 text-muted-foreground" /></div>
             <h1 className="mt-5 text-3xl font-extrabold">Booking cancelled</h1>
             <p className="mt-2 font-semibold">
-              {refund ? `${formatMoneyExact(refund.amount, refund.currency)} refund initiated` : (payment.status === "pending" || payment.status === "failed" ? "No payment was completed." : "No refund — cancelled within the non-refundable window")}
+              {refund ? `${formatMoneyExact(refund.amount, refund.currency)} ${refund.amount === 0 ? "— no refund due" : refund.status === "completed" ? "refunded" : "refund pending"}` : (payment.status === "pending" || payment.status === "failed" ? "No payment was completed." : "No refund — cancelled within the non-refundable window")}
             </p>
-            {refund && <p className="mt-1 text-sm text-muted-foreground">It usually arrives within 5–10 business days.</p>}
+            {refund && <p className="mt-1 text-sm text-muted-foreground">{payment.provider === "stellar-native" ? (refund.status === "completed" ? "Refund processing complete." : "The Organizer must sign the EURC refund. Completion requires on-chain verification.") : "It usually arrives within 5–10 business days."}</p>}
           </div>
         ) : status === "cancelled" ? (
           <div className="py-6 text-center">
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-danger-soft"><XCircle className="h-10 w-10 text-destructive" /></div>
             <h1 className="mt-5 text-3xl font-extrabold">Game cancelled</h1>
-            <p className="mt-2 text-muted-foreground">{payment.status === "pending" || payment.status === "failed" ? "No payment was completed." : "Your payment will be fully refunded."}</p>
+            <p className="mt-2 text-muted-foreground">{payment.status === "pending" || payment.status === "failed" ? (payment.provider === "stellar-native" ? "Payment is not yet verified. Check its status before sending again." : "No payment was completed.") : payment.provider === "stellar-native" ? "Contact the Organizer to process your EURC refund." : "Your payment will be fully refunded."}</p>
             {gameRefund && <p className="mt-1 font-semibold">{formatMoneyExact(gameRefund.amount, gameRefund.currency)} refund initiated</p>}
           </div>
         ) : status === "completed" ? (
@@ -114,9 +114,17 @@ function BookingPage() {
             <dt className="text-muted-foreground">Spots</dt><dd className="tabular text-right font-semibold">{paid} / {game.maxPlayers} booked</dd>
           </dl>
           {status === "pending" && paidBooking && (
-            <p className="mt-4 rounded-xl bg-warning-soft p-3 text-sm text-warning">{statusLabel.pending}: needs {game.minPlayers - paid} more player{game.minPlayers - paid === 1 ? "" : "s"}. If it doesn't happen, you get a full refund.</p>
+            <p className="mt-4 rounded-xl bg-warning-soft p-3 text-sm text-warning">{statusLabel.pending}: needs {game.minPlayers - paid} more player{game.minPlayers - paid === 1 ? "" : "s"}. {payment.provider === "stellar-native" ? "The Organizer processes eligible EURC refunds through Freighter." : "If it doesn't happen, you get a full refund."}</p>
           )}
         </div>
+
+        {payment.provider === "stellar-native" && payment.providerRef && (
+          <a className="block break-all text-sm text-primary underline" href={`https://stellar.expert/explorer/testnet/tx/${payment.providerRef}`} target="_blank" rel="noreferrer">View verified Stellar transaction</a>
+        )}
+        {payment.refundTransactionHash && <a className="block break-all text-sm text-primary underline" href={`https://stellar.expert/explorer/testnet/tx/${payment.refundTransactionHash}`} target="_blank" rel="noreferrer">View verified EURC refund</a>}
+        {payment.provider === "stellar-native" && booking.status === "pending" && !payable && (
+          <Button variant="outline" asChild><Link to="/checkout/$bookingId" params={{ bookingId }}>Check payment status</Link></Button>
+        )}
 
         {paidBooking && status !== "cancelled" && status !== "completed" && (
           <>
@@ -142,7 +150,7 @@ function BookingPage() {
             <AlertDialogDescription>
               {quote.eligible
                 ? `You're cancelling more than ${p.cutoffHours} hours before the game, so you get ${quote.refundPercent}% back.`
-                : `Cancellations made less than ${p.cutoffHours} hours before the game are not eligible for a refund.`}
+                : `Cancellations made ${p.cutoffHours} hours or less before the game are not eligible for a refund.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <dl className="grid grid-cols-2 gap-y-2 rounded-xl bg-muted p-4 text-sm">

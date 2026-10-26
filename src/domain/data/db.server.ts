@@ -3,7 +3,9 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { canBook, canCancelGame, computeGameStatus } from "../game-logic";
-import { getBookingPaymentProvider } from "../payments/provider-factory.server";
+import { getBookingPaymentProvider, getPaymentProvider } from "../payments/provider-factory.server";
+import { decodeNativeIntent, initialNativeRef, inspectNativeTransaction, NativeStellarProvider, nativeAmount, NATIVE_NETWORK, NATIVE_ISSUER } from "../payments/native-stellar.server";
+import { readNativeRefund, refundTransfer, verifyOriginalPayment, type NativeRefundRecord } from "../payments/native-refund.server";
 import { quoteGameCancellation, quotePlayerCancellation } from "../refund";
 import type { Booking, Currency, Game, NewGameInput, Payment, Player, Refund } from "../types";
 
@@ -74,13 +76,21 @@ const toPlayer = (row: PlayerRow): Player => ({
   phone: row.phone ?? undefined,
 });
 
+function paymentReferences(row: PaymentRow) {
+  const refund = row.provider === "stellar-native" ? readNativeRefund(row.external_reference) : null;
+  if (refund) return { providerRef: refund.paymentHash, ...(refund.refundHash ? { refundTransactionHash: refund.refundHash } : {}) };
+  return row.external_reference && (row.provider !== "stellar-native" || /^[a-f0-9]{64}$/.test(row.external_reference)) ? { providerRef: row.external_reference } : {};
+}
+
 const toPayment = (row: PaymentRow): Payment => ({
   id: row.id,
   bookingId: row.booking_id,
   amount: row.amount,
   currency: currencyOf(row.currency),
   status: row.status,
-  ...(row.external_reference ? { providerRef: row.external_reference } : {}),
+  provider: row.provider,
+  // Keep original payment evidence visible; never expose unsigned intents.
+  ...paymentReferences(row),
   createdAt: row.created_at,
 });
 
@@ -178,6 +188,7 @@ export async function createBookingRecord(gameId: string, player: Omit<Player, "
   const db = createDb();
   const game = await fetchGameRow(db, gameId);
   if (!canBook(await currentGameStatus(db, toGame(game)))) throw new Error("This game is not bookable.");
+  if (paymentProvider.id === "stellar-native") nativeAmount({ bookingId: "validation", amount: game.price_per_player, currency: currencyOf(game.currency) });
 
   const { data: playerRow, error: playerErr } = await db
     .from("players")
@@ -211,6 +222,8 @@ export async function payBookingRecord(bookingId: string): Promise<boolean> {
   const { data: payment, error } = await db.from("payments").select("*").eq("booking_id", bookingId).maybeSingle();
   if (error) throw error;
   if (!payment?.external_reference) return false;
+  // Never allow the mock/legacy confirmation route to mark a real payment paid.
+  if (payment.provider !== "mock" || paymentProvider.id !== "mock") throw new Error("Use the wallet payment flow for this booking.");
 
   const { data: booking, error: bookingError } = await db.from("bookings").select("*").eq("id", bookingId).maybeSingle();
   if (bookingError) throw bookingError;
@@ -235,6 +248,169 @@ export async function payBookingRecord(bookingId: string): Promise<boolean> {
   return status === "successful";
 }
 
+/** Native payments keep one immutable intent per booking, then store the verified hash. */
+export async function nativeBookingPayment(input: { bookingId: string; payer: string; signedXdr?: string | undefined }) {
+  const provider = getPaymentProvider();
+  if (!(provider instanceof NativeStellarProvider)) throw new Error("Native Stellar payments are not enabled on this server.");
+  const db = createDb();
+  const { data: booking, error: bookingError } = await db.from("bookings").select("*").eq("id", input.bookingId).maybeSingle();
+  if (bookingError) throw bookingError;
+  const { data: payment, error: paymentError } = await db.from("payments").select("*").eq("booking_id", input.bookingId).maybeSingle();
+  if (paymentError) throw paymentError;
+  if (!booking || !payment || payment.provider !== provider.id || !payment.external_reference) throw new Error("Native payment booking not found. Create a new booking with this provider enabled.");
+  const context = { bookingId: booking.id, amount: payment.amount, currency: currencyOf(payment.currency) };
+  const game = toGame(await fetchGameRow(db, booking.game_id));
+  const ref = payment.external_reference;
+  const confirmBooking = async () => {
+    if (booking.status !== "pending" && booking.status !== "confirmed") throw new Error("Payment received but booking needs manual reconciliation.");
+    const { error } = await db.from("bookings").update({ status: "confirmed" }).eq("id", booking.id).in("status", ["pending", "confirmed"]);
+    if (error) throw error;
+  };
+  if (payment.status === "successful" && /^[a-f0-9]{64}$/.test(ref)) {
+    // Repairs an interrupted second DB write without another charge.
+    await confirmBooking();
+    return { status: "verified" as const, hash: ref };
+  }
+  if (payment.status !== "pending" || booking.status !== "pending") throw new Error("This booking cannot accept a native payment.");
+  const persistVerified = async (hash: string) => {
+    const { data, error } = await db.from("payments").update({ status: "successful", external_reference: hash, updated_at: new Date().toISOString() })
+      .eq("id", payment.id).eq("status", "pending").eq("external_reference", ref).select("id");
+    if (error) throw error;
+    if (!data?.length) throw new Error("Payment state changed. Retry this booking to reconcile; do not pay again.");
+    await confirmBooking();
+    return { status: "verified" as const, hash };
+  };
+  const assertPayable = async () => {
+    const status = await currentGameStatus(db, game);
+    if (!canBook(status)) throw new Error("This game is no longer accepting payments.");
+    return status;
+  };
+  if (ref !== initialNativeRef(booking.id)) {
+    const intent = decodeNativeIntent(ref);
+    // Check the saved hash first, even after game expiry or a client timeout.
+    if (await provider.verify(intent, context)) return persistVerified(intent.hash);
+    if (intent.payer !== input.payer) throw new Error("Reconnect the wallet used to prepare this booking's payment.");
+    await assertPayable();
+    const tx = inspectNativeTransaction(intent.xdr, intent, context, provider.receiver);
+    if (Number(tx.timeBounds!.maxTime) <= Date.now() / 1000) throw new Error("Saved payment expired. Contact the operator to reconcile this booking before any new payment.");
+    if (input.signedXdr) {
+      if (await provider.submit(input.signedXdr, intent, context)) return persistVerified(intent.hash);
+      return { status: "pending" as const, hash: intent.hash };
+    }
+    return { status: "awaiting_signature" as const, xdr: intent.xdr, hash: intent.hash, payer: intent.payer, receiver: provider.receiver, amount: nativeAmount(context), networkPassphrase: NATIVE_NETWORK };
+  }
+  if (input.signedXdr) throw new Error("Prepare and save the payment before signing.");
+  const status = await assertPayable();
+  const expiresAt = status === "confirmed" ? Date.parse(game.endsAt) : Math.min(Date.parse(game.confirmationDeadline), Date.parse(game.endsAt));
+  const intent = await provider.prepare(context, input.payer, Math.floor(expiresAt / 1000));
+  // Compare-and-set: concurrent requests cannot hand out two different payable transactions.
+  const { data, error } = await db.from("payments").update({ external_reference: JSON.stringify(intent), updated_at: new Date().toISOString() })
+    .eq("id", payment.id).eq("status", "pending").eq("external_reference", ref).select("id");
+  if (error) throw error;
+  if (!data?.length) throw new Error("Another payment preparation won. Retry this booking to load its saved transaction.");
+  return { status: "awaiting_signature" as const, xdr: intent.xdr, hash: intent.hash, payer: intent.payer, receiver: provider.receiver, amount: nativeAmount(context), networkPassphrase: NATIVE_NETWORK };
+}
+
+// Refund state lives in the existing payment reference, retaining the original hash.
+// The refund row uses payment.id as its deterministic primary key for retry safety.
+async function syncNativeRefund(db: ReturnType<typeof createDb>, payment: PaymentRow, record: NativeRefundRecord) {
+  const done = Boolean(record.refundHash) || record.amount === 0;
+  const { error: insertError } = await db.from("refunds").upsert({
+    id: payment.id, payment_id: payment.id, amount: record.amount, reason: record.reason,
+    status: "pending", created_at: record.requestedAt,
+  }, { onConflict: "id", ignoreDuplicates: true });
+  if (insertError) throw insertError;
+  if (done) {
+    const { error } = await db.from("refunds").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", payment.id);
+    if (error) throw error;
+  }
+  const { error } = await db.from("bookings").update({ status: record.refundHash ? "refunded" : "cancelled", cancelled_at: record.requestedAt }).eq("id", payment.booking_id).in("status", record.refundHash ? ["pending", "confirmed", "cancelled", "refunded"] : ["pending", "confirmed", "cancelled"]);
+  if (error) throw error;
+}
+
+export async function requestNativeRefund(bookingId: string, reason: "player_cancelled" | "game_cancelled" = "player_cancelled") {
+  const provider = getPaymentProvider();
+  if (!(provider instanceof NativeStellarProvider)) throw new Error("Enable native Stellar to manage its refunds.");
+  const db = createDb();
+  const { data: booking, error: be } = await db.from("bookings").select("*").eq("id", bookingId).maybeSingle();
+  const { data: payment, error: pe } = await db.from("payments").select("*").eq("booking_id", bookingId).maybeSingle();
+  if (be) throw be;
+  if (pe) throw pe;
+  if (!booking || !payment || payment.provider !== "stellar-native") throw new Error("Native booking not found.");
+  const saved = readNativeRefund(payment.external_reference);
+  if (saved) { await syncNativeRefund(db, payment, saved); return saved; }
+  if (booking.status !== "confirmed" || payment.status !== "successful" || !payment.external_reference)
+    throw new Error("Only a confirmed, verified native payment can be cancelled. Reconcile pending payments first.");
+  const game = toGame(await fetchGameRow(db, booking.game_id));
+  if (reason === "game_cancelled") {
+    if (!game.cancelledAt || game.cancelReason !== "organizer") throw new Error("Organizer must cancel the game first.");
+  } else if (!canCancelGame(await currentGameStatus(db, game))) throw new Error("This game is no longer cancellable.");
+  const now = new Date();
+  const quote = reason === "game_cancelled" ? quoteGameCancellation(game, payment.amount) : quotePlayerCancellation(game, payment.amount, now);
+  if (!Number.isSafeInteger(quote.refund) || quote.refund < 0 || quote.refund > payment.amount) throw new Error("Invalid refund policy amount.");
+  const payer = await verifyOriginalPayment(payment.external_reference, { bookingId, amount: payment.amount, currency: currencyOf(payment.currency) }, provider.receiver);
+  const record: NativeRefundRecord = { kind: "stellar-native-refund-v1", paymentHash: payment.external_reference, payer, amount: quote.refund, reason, requestedAt: now.toISOString() };
+  const { data, error } = await db.from("payments").update({ external_reference: JSON.stringify(record), status: record.amount > 0 ? "refund_pending" : "successful", updated_at: now.toISOString() })
+    .eq("id", payment.id).eq("status", "successful").eq("external_reference", payment.external_reference).select("id");
+  if (error) throw error;
+  if (!data?.length) throw new Error("Cancellation state changed. Retry the same booking.");
+  await syncNativeRefund(db, payment, record);
+  return record;
+}
+
+export async function nativeBookingRefund(input: { bookingId: string; organizer: string; signedXdr?: string | undefined }) {
+  const originalProvider = getPaymentProvider();
+  if (!(originalProvider instanceof NativeStellarProvider)) throw new Error("Native Stellar is not enabled.");
+  if (input.organizer !== originalProvider.receiver) throw new Error("Select the Organizer wallet in Freighter.");
+  const db = createDb();
+  const { data: payment, error } = await db.from("payments").select("*").eq("booking_id", input.bookingId).maybeSingle();
+  if (error) throw error;
+  if (!payment || payment.provider !== "stellar-native") throw new Error("Native payment not found.");
+  const record = readNativeRefund(payment.external_reference);
+  if (!record) throw new Error("Cancel the confirmed booking before preparing its refund.");
+  const context = { bookingId: input.bookingId, amount: payment.amount, currency: currencyOf(payment.currency) };
+  const payer = await verifyOriginalPayment(record.paymentHash, context, originalProvider.receiver);
+  if (payer !== record.payer) throw new Error("Refund recipient differs from the original payer.");
+  await syncNativeRefund(db, payment, record);
+  if (record.amount === 0) return { status: "no_refund" as const };
+  const transfer = refundTransfer(payment.id, record, context);
+  const save = async (next: NativeRefundRecord, completed = false) => {
+    const { data, error } = await db.from("payments").update({ external_reference: JSON.stringify(next), status: completed ? "refunded" : "refund_pending", updated_at: new Date().toISOString() })
+      .eq("id", payment.id).eq("external_reference", payment.external_reference!).eq("status", "refund_pending").select("id");
+    if (error) throw error;
+    if (!data?.length) throw new Error("Refund state changed. Retry the same refund; do not send separately.");
+  };
+  let intent = record.intent ? decodeNativeIntent(record.intent) : null;
+  if (intent) {
+    if (intent.payer !== originalProvider.receiver) throw new Error("Refund must be signed by the Organizer.");
+    // Reconcile first, including after expiry and after a partial database write.
+    if (await transfer.provider.verify(intent, transfer.context)) {
+      if (record.refundHash && record.refundHash !== intent.hash) throw new Error("Refund hash mismatch.");
+      const completed = { ...record, refundHash: intent.hash };
+      if (!record.refundHash) await save(completed, true);
+      await syncNativeRefund(db, payment, completed);
+      return { status: "verified" as const, hash: intent.hash };
+    }
+    if (record.refundHash) throw new Error("Saved refund receipt could not be verified. Do not resend.");
+    const tx = inspectNativeTransaction(intent.xdr, intent, transfer.context, payer);
+    if (Number(tx.timeBounds!.maxTime) <= Date.now() / 1000) throw new Error("Saved refund expired. Reconcile its hash with the operator; do not create another refund.");
+    if (input.signedXdr) {
+      if (await transfer.provider.submit(input.signedXdr, intent, transfer.context)) {
+        const completed = { ...record, refundHash: intent.hash };
+        await save(completed, true);
+        await syncNativeRefund(db, payment, completed);
+        return { status: "verified" as const, hash: intent.hash };
+      }
+      return { status: "pending" as const, hash: intent.hash };
+    }
+  } else {
+    if (input.signedXdr || record.refundHash) throw new Error("Prepare and persist the refund before signing.");
+    intent = await transfer.provider.prepare(transfer.context, originalProvider.receiver, Math.floor(Date.now() / 1000) + 300);
+    await save({ ...record, intent: JSON.stringify(intent) });
+  }
+  return { status: "awaiting_signature" as const, xdr: intent.xdr, hash: intent.hash, organizer: originalProvider.receiver, payer, amount: nativeAmount(transfer.context), paymentHash: record.paymentHash, issuer: NATIVE_ISSUER };
+}
+
 export async function cancelBookingRecord(bookingId: string): Promise<void> {
   const paymentProvider = getBookingPaymentProvider();
   const db = createDb();
@@ -242,6 +418,7 @@ export async function cancelBookingRecord(bookingId: string): Promise<void> {
   if (error) throw error;
   const payment = one((booking as BookingJoin | null)?.payments ?? null);
   if (!booking || !payment) return;
+  if (payment.provider === "stellar-native") { await requestNativeRefund(bookingId); return; }
   const game = toGame(await fetchGameRow(db, booking.game_id));
   if (!canCancelGame(await currentGameStatus(db, game))) throw new Error("This game is no longer cancellable.");
   if (booking.status !== "pending" && booking.status !== "confirmed") return;
@@ -262,6 +439,10 @@ export async function cancelBookingRecord(bookingId: string): Promise<void> {
 export async function cancelGameRecord(gameId: string): Promise<void> {
   const paymentProvider = getBookingPaymentProvider();
   const db = createDb();
+  // Block cancellation even while a native transaction is awaiting a wallet signature.
+  const { data: allBookings, error: nativeError } = await db.from("bookings").select("*, payments(*)").eq("game_id", gameId);
+  if (nativeError) throw nativeError;
+  if ((allBookings as BookingJoin[]).some(row => one(row.payments)?.provider === "stellar-native")) { await cancelNativeGame(db, gameId, allBookings as BookingJoin[]); return; }
   const game = toGame(await fetchGameRow(db, gameId));
   if (!canCancelGame(await currentGameStatus(db, game))) throw new Error("This game is no longer cancellable.");
   const { data: rows, error } = await db.from("bookings").select("*, payments(*)").eq("game_id", gameId).eq("status", "confirmed");
@@ -282,6 +463,43 @@ export async function cancelGameRecord(gameId: string): Promise<void> {
   if (bookErr) throw bookErr;
   const { error: gameErr } = await db.from("games").update({ status: "cancelled", cancelled_at: now, cancel_reason: "organizer", updated_at: now }).eq("id", gameId);
   if (gameErr) throw gameErr;
+}
+
+async function cancelNativeGame(db: ReturnType<typeof createDb>, gameId: string, rows: BookingJoin[]) {
+  const game = toGame(await fetchGameRow(db, gameId));
+  if (!canCancelGame(await currentGameStatus(db, game)) && !(game.cancelledAt && game.cancelReason === "organizer"))
+    throw new Error("This game is no longer cancellable.");
+  // A prepared payment could still land outside the app. Reconcile it first.
+  for (const row of rows) {
+    const p = one(row.payments);
+    if (p?.provider === "stellar-native" && row.status === "pending" && p.external_reference !== initialNativeRef(row.id))
+      throw new Error("Reconcile pending native payments before cancelling this game.");
+  }
+  const now = game.cancelledAt ?? new Date().toISOString();
+  const { error } = await db.from("games").update({ status: "cancelled", cancelled_at: now, cancel_reason: "organizer", updated_at: now }).eq("id", gameId);
+  if (error) throw error;
+  for (const row of rows) {
+    const p = one(row.payments);
+    if (!p) continue;
+    if (p.provider === "stellar-native") {
+      if (readNativeRefund(p.external_reference)) { await requestNativeRefund(row.id, "game_cancelled"); continue; }
+      if (row.status === "confirmed" && p.status === "successful") { await requestNativeRefund(row.id, "game_cancelled"); continue; }
+      if (row.status === "pending" && p.status === "pending") {
+        const { data, error } = await db.from("payments").update({ status: "failed" }).eq("id", p.id).eq("status", "pending").eq("external_reference", initialNativeRef(row.id)).select("id");
+        if (error) throw error;
+        if (!data?.length) throw new Error("Payment preparation raced cancellation. Reconcile it before continuing.");
+      }
+    } else if (row.status === "confirmed" && p.status === "successful") {
+      // Existing mock records remain simulated even while native mode is enabled.
+      const quote = quoteGameCancellation(game, p.amount);
+      const { error } = await db.from("refunds").upsert({ id: p.id, payment_id: p.id, amount: quote.refund, status: "pending", reason: "game_cancelled" }, { onConflict: "id", ignoreDuplicates: true });
+      if (error) throw error;
+      const { error: pe } = await db.from("payments").update({ status: "refund_pending", updated_at: now }).eq("id", p.id).eq("status", "successful");
+      if (pe) throw pe;
+    }
+    const { error: be } = await db.from("bookings").update({ status: "cancelled", cancelled_at: now }).eq("id", row.id).in("status", ["pending", "confirmed"]);
+    if (be) throw be;
+  }
 }
 
 /** Milliseconds offset of a time zone at a given UTC instant (server runs in UTC). */

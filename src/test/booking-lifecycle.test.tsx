@@ -7,6 +7,7 @@ import { computeGameStatus, paidPlayerCount } from "@/domain/game-logic";
 
 const mocks = vi.hoisted(() => ({
   state: null as unknown as State,
+  prepareNativeRefund: vi.fn(), signNativeRefund: vi.fn(),
   createBooking: vi.fn(), payBooking: vi.fn(), cancelBooking: vi.fn(), cancelGame: vi.fn(), navigate: vi.fn(),
 }));
 vi.mock("@/domain/store", () => ({
@@ -17,6 +18,7 @@ vi.mock("@/domain/store", () => ({
     return { game, paid, status: computeGameStatus(game, paid, new Date()) };
   },
   createBooking: mocks.createBooking, payBooking: mocks.payBooking,
+  prepareNativeRefund: mocks.prepareNativeRefund, signNativeRefund: mocks.signNativeRefund,
   cancelBooking: mocks.cancelBooking, cancelGame: mocks.cancelGame, createGame: vi.fn(),
 }));
 vi.mock("@tanstack/react-router", () => ({
@@ -46,6 +48,81 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("booking lifecycle UI", () => {
+  it.each(["pending", "confirmed"])("allows a future %s game with space to reach checkout", async (status) => {
+    const game = mocks.state.games[0]!;
+    game.startsAt = "2026-10-29T20:00:00Z";
+    game.endsAt = "2026-10-29T22:00:00Z";
+    game.confirmationDeadline = "2026-10-29T12:00:00Z";
+    if (status === "confirmed") {
+      const seed = seedBookings();
+      mocks.state.bookings = seed.bookings;
+      mocks.state.payments = seed.payments;
+    }
+    const paid = paidPlayerCount(game.id, mocks.state.bookings, mocks.state.payments);
+    expect(computeGameStatus(game, paid, new Date())).toBe(status);
+    expect(paid).toBeLessThan(game.maxPlayers);
+    mocks.createBooking.mockResolvedValueOnce("future-booking");
+    render(<Details />);
+    fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Demo" } });
+    fireEvent.change(screen.getByLabelText("Last name"), { target: { value: "Player" } });
+    const button = screen.getByRole("button", { name: "Continue to payment" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: "/checkout/$bookingId", params: { bookingId: "future-booking" } }));
+  });
+
+  it.each(["completed", "cancelled", "sold_out"])("blocks booking a %s game even with valid names", (status) => {
+    const game = mocks.state.games[0]!;
+    if (status === "completed") vi.setSystemTime(new Date(game.endsAt));
+    if (status === "cancelled") game.cancelledAt = new Date().toISOString();
+    if (status === "sold_out") {
+      mocks.state.bookings[0]!.status = "confirmed";
+      mocks.state.bookings[0]!.spots = game.maxPlayers;
+      mocks.state.payments[0]!.status = "successful";
+    }
+    render(<Details />);
+    fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Demo" } });
+    fireEvent.change(screen.getByLabelText("Last name"), { target: { value: "Player" } });
+    expect(screen.getByRole("button", { name: "Continue to payment" })).toBeDisabled();
+    expect(mocks.createBooking).not.toHaveBeenCalled();
+  });
+
+  it("reviews the exact native refund before a separate signing action", async () => {
+    mocks.state.bookings[0]!.status = "cancelled";
+    mocks.state.payments[0]!.provider = "stellar-native";
+    mocks.state.payments[0]!.status = "refund_pending";
+    mocks.prepareNativeRefund.mockResolvedValueOnce({ status: "awaiting_signature", xdr: "unsigned", hash: "refund-hash", amount: "5.6000000", payer: "original-player", organizer: "organizer", paymentHash: "original-hash", issuer: "EURC-issuer" });
+    mocks.signNativeRefund.mockResolvedValueOnce("refund-hash");
+    render(<Organizer />);
+    fireEvent.click(screen.getByRole("button", { name: "Review EURC refund" }));
+    await waitFor(() => expect(screen.getByText(/5.6000000 EURC/)).toBeInTheDocument());
+    expect(screen.getByText(/To original payer: original-player/)).toBeInTheDocument();
+    expect(mocks.signNativeRefund).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Sign refund with Freighter" }));
+    await waitFor(() => expect(mocks.signNativeRefund).toHaveBeenCalledWith(mocks.state.bookings[0]!.id, "unsigned", "organizer"));
+  });
+
+  it("shows native checkout and wallet errors without implying payment success", async () => {
+    mocks.state.payments[0]!.provider = "stellar-native";
+    mocks.payBooking.mockRejectedValueOnce(new Error("Select Testnet in Freighter"));
+    render(<Checkout />);
+    expect(screen.queryByText(/Demo checkout/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Eligible refunds are signed by the Organizer/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pay with Freighter" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Select Testnet"));
+    expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it("shows the native verified hash and enables policy cancellation", () => {
+    mocks.state.payments[0]!.provider = "stellar-native";
+    mocks.state.payments[0]!.providerRef = "a".repeat(64);
+    mocks.state.payments[0]!.status = "successful";
+    mocks.state.bookings[0]!.status = "confirmed";
+    render(<BookingPage />);
+    expect(screen.getByRole("link", { name: "View verified Stellar transaction" })).toHaveAttribute("href", `https://stellar.expert/explorer/testnet/tx/${"a".repeat(64)}`);
+    expect(screen.getByRole("button", { name: "Cancel booking" })).toBeEnabled();
+  });
+
   it("does not show a paid receipt or success for a pending booking", () => {
     render(<BookingPage />);
     expect(screen.getByRole("heading", { name: "Booking pending" })).toBeInTheDocument();

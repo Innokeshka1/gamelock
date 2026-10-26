@@ -1,5 +1,6 @@
+import { createClientOnlyFn } from "@tanstack/react-start";
 import { useSyncExternalStore } from "react";
-import { cancelBookingFn, cancelGameFn, createBookingFn, createGameFn, getAppState, payBookingFn } from "./data/api";
+import { cancelBookingFn, cancelGameFn, createBookingFn, createGameFn, getAppState, payBookingFn, nativeBookingPaymentFn, nativeBookingRefundFn } from "./data/api";
 import { computeGameStatus, paidPlayerCount } from "./game-logic";
 import type { Booking, Game, GameStatus, NewGameInput, Payment, Player, Refund } from "./types";
 
@@ -90,7 +91,22 @@ export async function createBooking(gameId: string, player: Omit<Player, "id">):
   return bookingId;
 }
 
+const payNativeWithWallet = createClientOnlyFn(async (bookingId: string): Promise<boolean> => {
+  const { connectPlayerWallet, signPlayerPayment } = await import("./payments/freighter.client");
+  const payer = await connectPlayerWallet();
+  const prepared = await nativeBookingPaymentFn({ data: { bookingId, payer } });
+  if (prepared.status === "verified") { await refreshStore(); return true; }
+  if (prepared.status !== "awaiting_signature") throw new Error("Payment is awaiting chain verification. Retry this booking; do not send another payment.");
+  const signedXdr = await signPlayerPayment(prepared.xdr, payer);
+  const completed = await nativeBookingPaymentFn({ data: { bookingId, payer, signedXdr } });
+  await refreshStore();
+  if (completed.status !== "verified") throw new Error(`Payment is not yet verified (${completed.hash}). Retry this booking to check the same transaction.`);
+  return true;
+});
+
 export async function payBooking(bookingId: string): Promise<boolean> {
+  const payment = state.payments.find(p => p.bookingId === bookingId);
+  if (payment?.provider === "stellar-native") return Boolean(await payNativeWithWallet(bookingId));
   const { ok } = await payBookingFn({ data: { bookingId } });
   await refreshStore();
   return ok;
@@ -115,3 +131,21 @@ export async function createGame(input: NewGameInput): Promise<string> {
 export function useAppState(): State {
   return useStore((s) => s);
 }
+
+// Refund review and signing are separate user actions. No signing on preparation.
+export const prepareNativeRefund = createClientOnlyFn(async (bookingId: string) => {
+  const { connectPlayerWallet } = await import("./payments/freighter.client");
+  const organizer = await connectPlayerWallet();
+  const result = await nativeBookingRefundFn({ data: { bookingId, organizer } });
+  await refreshStore();
+  return result;
+});
+
+export const signNativeRefund = createClientOnlyFn(async (bookingId: string, xdr: string, organizer: string) => {
+  const { signPlayerPayment } = await import("./payments/freighter.client");
+  const signedXdr = await signPlayerPayment(xdr, organizer);
+  const result = await nativeBookingRefundFn({ data: { bookingId, organizer, signedXdr } });
+  await refreshStore();
+  if (result.status !== "verified") throw new Error("Refund is not yet verified. Check this same refund again; do not send a separate transfer.");
+  return result.hash;
+});

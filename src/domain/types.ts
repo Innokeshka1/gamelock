@@ -84,6 +84,8 @@ export interface Payment {
   currency: Currency;
   status: PaymentStatus;
   providerRef?: string;
+  refundTransactionHash?: string;
+  provider?: string;
   createdAt: string;
 }
 

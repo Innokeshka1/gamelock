@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { shortDate, startTime } from "@/domain/format";
 import { formatMoney, formatMoneyExact } from "@/domain/money";
 import { policySummary } from "@/domain/refund";
-import { canPayBooking } from "@/domain/game-logic";
+import { canPayBooking, canReconcileNativePayment } from "@/domain/game-logic";
 import { payBooking, useAppState, viewGame } from "@/domain/store";
 
 export const Route = createFileRoute("/checkout/$bookingId")({
@@ -26,7 +26,7 @@ function Checkout() {
   const navigate = useNavigate();
   const state = useAppState();
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const booking = state.bookings.find((b) => b.id === bookingId);
   const game = state.games.find((g) => g.id === booking?.gameId);
   const payment = state.payments.find((p) => p.id === booking?.paymentId);
@@ -40,18 +40,18 @@ function Checkout() {
     );
   }
 
-  const payable = canPayBooking(viewGame(state, game).status, booking, payment);
+  const payable = canPayBooking(viewGame(state, game).status, booking, payment) || canReconcileNativePayment(booking, payment);
 
   async function pay() {
     if (busy || !payable) return;
     setBusy(true);
-    setFailed(false);
+    setFailed(null);
     try {
       const ok = await payBooking(bookingId);
       if (ok) await navigate({ to: "/bookings/$bookingId", params: { bookingId }, replace: true });
-      else setFailed(true);
-    } catch {
-      setFailed(true);
+      else setFailed("Could not confirm payment. Check your booking status before trying again.");
+    } catch (error) {
+      setFailed(`Could not confirm payment. ${error instanceof Error ? error.message : "Retry this booking to reconcile."}`);
     } finally {
       setBusy(false);
     }
@@ -73,16 +73,16 @@ function Checkout() {
 
         <div className="flex gap-3 rounded-2xl bg-muted p-4 text-sm">
           <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-success" />
-          <p>{policySummary(game)}</p>
+          <p>{payment.provider === "stellar-native" ? "Direct EURC payment to GameLock on Stellar Testnet. Eligible refunds are signed by the Organizer according to the game cancellation policy." : policySummary(game)}</p>
         </div>
 
-        {failed && <p className="rounded-xl bg-danger-soft p-4 text-sm font-semibold text-destructive">Could not confirm payment. Check your booking status before trying again.</p>}
+        {failed && <p role="alert" className="rounded-xl bg-danger-soft p-4 text-sm font-semibold text-destructive">{failed}</p>}
       </Page>
       <ActionBar>
         <Button size="xl" onClick={pay} disabled={busy || !payable}>
-          {busy ? <><Loader2 className="animate-spin" /> Processing…</> : <><Lock /> Pay {formatMoney(payment.amount, payment.currency)}</>}
+          {busy ? <><Loader2 className="animate-spin" /> Processing…</> : <><Lock /> {payment.provider === "stellar-native" ? "Pay with Freighter" : `Pay ${formatMoney(payment.amount, payment.currency)}`}</>}
         </Button>
-        <p className="text-center text-xs text-muted-foreground">Demo checkout — no real payment is taken.</p>
+        <p className="text-center text-xs text-muted-foreground">{payment.provider === "stellar-native" ? "Freighter signs a real Testnet EURC transfer. XLM covers the network fee." : "Demo checkout — no real payment is taken."}</p>
       </ActionBar>
     </>
   );

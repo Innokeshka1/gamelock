@@ -2,6 +2,21 @@
 // is fully public. UI and store call these; the database stays behind them.
 import { createServerFn } from "@tanstack/react-start";
 import type { NewGameInput, Player } from "../types";
+import { z } from "zod";
+
+export const nativeBookingPaymentFn = createServerFn({ method: "POST" })
+  .inputValidator(z.object({ bookingId: z.string().min(1).max(200), payer: z.string().regex(/^G[A-Z2-7]{55}$/), signedXdr: z.string().min(1).max(20000).optional() }))
+  .handler(async ({ data }) => {
+    const { nativeBookingPayment } = await import("./db.server");
+    return nativeBookingPayment(data);
+  });
+
+export const nativeBookingRefundFn = createServerFn({ method: "POST" })
+  .inputValidator(z.object({ bookingId: z.string().min(1).max(200), organizer: z.string().regex(/^G[A-Z2-7]{55}$/), signedXdr: z.string().min(1).max(20000).optional() }))
+  .handler(async ({ data }) => {
+    const { nativeBookingRefund } = await import("./db.server");
+    return nativeBookingRefund(data);
+  });
 
 // POST so the browser never serves a cached snapshot — state changes constantly.
 export const getAppState = createServerFn({ method: "POST" }).handler(async () => {

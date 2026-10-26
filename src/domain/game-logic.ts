@@ -37,6 +37,12 @@ export function canPayBooking(status: GameStatus, booking: Booking, payment: Pay
     (payment.status === "pending" || payment.status === "failed");
 }
 
+/** Allows checking a possibly submitted native payment after the game window closes. */
+export function canReconcileNativePayment(booking: Booking, payment: Payment): boolean {
+  return payment.provider === "stellar-native" && booking.status === "pending" &&
+    (payment.status === "pending" || payment.status === "successful");
+}
+
 export function isBookingPaid(booking: Booking, payment: Payment): boolean {
   return booking.status === "confirmed" && payment.status === "successful";
 }

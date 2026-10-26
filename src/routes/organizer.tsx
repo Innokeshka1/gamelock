@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { shortDate, timeRange } from "@/domain/format";
 import { canCancelGame } from "@/domain/game-logic";
 import { formatMoney } from "@/domain/money";
-import { cancelGame, createGame, useAppState, viewGame } from "@/domain/store";
+import { cancelGame, createGame, prepareNativeRefund, signNativeRefund, useAppState, viewGame } from "@/domain/store";
 import type { NewGameInput } from "@/domain/types";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +56,32 @@ function Organizer() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [refundBusy, setRefundBusy] = useState(false);
+  const [refundReview, setRefundReview] = useState<(Extract<Awaited<ReturnType<typeof prepareNativeRefund>>, { status: "awaiting_signature" }> & { bookingId: string }) | null>(null);
+
+  async function reviewRefund(bookingId: string) {
+    if (refundBusy) return;
+    setRefundBusy(true);
+    try {
+      const result = await prepareNativeRefund(bookingId);
+      if (result.status === "awaiting_signature") setRefundReview({ ...result, bookingId });
+      else toast.success(result.status === "verified" ? "EURC refund verified" : "No refund is due");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not prepare refund."); }
+    finally { setRefundBusy(false); }
+  }
+
+  async function signRefund() {
+    if (!refundReview || refundBusy) return;
+    setRefundBusy(true);
+    try {
+      await signNativeRefund(refundReview.bookingId, refundReview.xdr, refundReview.organizer);
+      setRefundReview(null);
+      toast.success("EURC refund verified on Testnet");
+    } catch (error) {
+      setRefundReview(null);
+      toast.error(error instanceof Error ? error.message : "Check this refund again before retrying.");
+    } finally { setRefundBusy(false); }
+  }
   const game = state.games.find((g) => g.id === gameId) ?? state.games[0];
   const view = game ? viewGame(state, game) : null;
   const rows = state.bookings
@@ -64,12 +90,12 @@ function Organizer() {
   const locked = rows.filter((r) => r.b.status === "confirmed" && r.p.status === "successful").reduce((n, r) => n + r.p.amount, 0);
 
   async function confirmCancel() {
-    if (!game || !view || busy || !canCancelGame(view.status)) return;
+    if (!game || !view || busy || !canCancelGame(view.status) && game.cancelReason !== "organizer") return;
     setBusy(true);
     try {
       await cancelGame(game.id);
       setOpen(false);
-      toast.success("Game cancelled", { description: "All players are being fully refunded." });
+      toast.success("Game cancelled", { description: "Refunds recorded. Sign pending native EURC refunds individually below." });
     } catch {
       toast.error("Could not cancel the game. Please try again.");
     } finally {
@@ -165,7 +191,7 @@ function Organizer() {
               <div className="mt-4"><CapacityBar paid={view.paid} min={game.minPlayers} max={game.maxPlayers} /></div>
               <div className="mt-5 flex flex-wrap gap-2">
                 <Button variant="outline" disabled={!canCancelGame(view.status)} onClick={() => toast("Editing games is coming soon")}><Pencil /> Edit game</Button>
-                {canCancelGame(view.status) && <Button variant="outline" className="text-destructive" onClick={() => setOpen(true)}>Cancel game</Button>}
+                {(canCancelGame(view.status) || game.cancelReason === "organizer") && <Button variant="outline" className="text-destructive" onClick={() => setOpen(true)}>{game.cancelReason === "organizer" ? "Resume cancellation" : "Cancel game"}</Button>}
               </div>
             </div>
 
@@ -185,7 +211,13 @@ function Organizer() {
                     {tab === "payments" && <div className="tabular text-xs text-muted-foreground">{formatMoney(p.amount, p.currency)} · {p.id}</div>}
                     {tab === "players" && b.status === "cancelled" && <div className="text-xs text-muted-foreground">Cancelled booking</div>}
                   </div>
-                  <PaymentChip status={p.status} />
+                  <div className="space-y-2 text-right">
+                    <PaymentChip status={p.status} />
+                    {p.provider === "stellar-native" && (p.status === "refund_pending" || (p.status === "refunded" && b.status !== "refunded")) && (
+                      <Button variant="outline" disabled={refundBusy} onClick={() => reviewRefund(b.id)}>Review EURC refund</Button>
+                    )}
+                    {p.refundTransactionHash && <a className="block text-sm text-primary underline" href={`https://stellar.expert/explorer/testnet/tx/${p.refundTransactionHash}`} target="_blank" rel="noreferrer">Verified refund</a>}
+                  </div>
                 </li>
               ))}
               {rows.length === 0 && <li className="px-5 py-6 text-center text-sm text-muted-foreground">No bookings yet.</li>}
@@ -198,14 +230,30 @@ function Organizer() {
         <AlertDialogContent className="rounded-2xl">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-2xl">Cancel this game?</AlertDialogTitle>
-            <AlertDialogDescription>All players will receive a full refund. This can't be undone.</AlertDialogDescription>
+            <AlertDialogDescription>Confirmed bookings will receive full refunds. Native EURC refunds require a separate Organizer signature for each booking. This can't be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2">
-            <Button variant="destructive" className="h-12 rounded-xl" onClick={confirmCancel} disabled={busy || !view || !canCancelGame(view.status)}>{busy && <Loader2 className="animate-spin" />} Cancel game & refund all</Button>
+            <Button variant="destructive" className="h-12 rounded-xl" onClick={confirmCancel} disabled={busy || !view || (!canCancelGame(view.status) && game?.cancelReason !== "organizer")}>{busy && <Loader2 className="animate-spin" />} Cancel game & refund all</Button>
             <AlertDialogCancel className="h-12 rounded-xl">Keep game</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={Boolean(refundReview)} onOpenChange={(open) => { if (!open && !refundBusy) setRefundReview(null); }}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader><DialogTitle>Review EURC refund</DialogTitle></DialogHeader>
+          {refundReview && <div className="space-y-3 break-all text-sm">
+            <p>Refund: <strong>{refundReview.amount} EURC</strong> · Stellar Testnet</p>
+            <p>EURC issuer: {refundReview.issuer}</p>
+            <p>Booking: {refundReview.bookingId}</p>
+            <p>Original payment: {refundReview.paymentHash}</p>
+            <p>From Organizer: {refundReview.organizer}</p>
+            <p>To original payer: {refundReview.payer}</p>
+            <p>Sign within five minutes. Process one refund at a time. If interrupted, review this same refund again to check its saved hash.</p>
+            <Button disabled={refundBusy} onClick={signRefund}>Sign refund with Freighter</Button>
+          </div>}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto rounded-2xl sm:max-w-lg">
